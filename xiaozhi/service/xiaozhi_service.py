@@ -740,6 +740,25 @@ async def _tool_camera_take_photo(question):
     return answer
 
 
+# ---- 智能显微镜工具（feature/microscope，开发方案 2.7）----
+_scope_tools = None
+_scope_tools_lock = threading.Lock()
+
+
+def _scope_callback(method):
+    async def invoke(**kwargs):
+        def execute():
+            global _scope_tools
+            with _scope_tools_lock:
+                if _scope_tools is None:
+                    from scope_tools import ScopeTools
+                    _scope_tools = ScopeTools()
+                tools = _scope_tools
+            return getattr(tools, method)(**kwargs)
+        return await asyncio.to_thread(execute)
+    return invoke
+
+
 MCP_TOOLS = [
     McpTool("self.siot.get_status", "查询本机已配置的SIoT MQTT连接状态，不泄露凭据；连接成功不代表其他设备在线",
             [], _siot_callback("get_status")),
@@ -787,6 +806,18 @@ MCP_TOOLS = [
     McpTool("self.get_device_status", "获取设备状态", [], _tool_get_device_status),
     McpTool("self.display.show_message", "在屏幕上显示一条消息",
             [Property("message", "string")], _tool_show_message),
+    McpTool("self.microscope.select_slot",
+            "智能显微镜换玻片：转盘换到第 slot 号玻片（1–4）。会先抬升载物台再转盘，完成后才回复；没收到完成回执时说明未确认，不要自动重试",
+            [Property("slot", "integer", None, 1, 4)], _scope_callback("select_slot")),
+    McpTool("self.microscope.autofocus",
+            "智能显微镜自动对焦，约需一到两分钟，完成后回复最清晰位置；没收到完成回执时说明未确认，不要自动重试",
+            [], _scope_callback("autofocus")),
+    McpTool("self.microscope.capture",
+            "智能显微镜拍一张高清原图存档，note 为备注（可为空），回复存档编号",
+            [Property("note", "string", "")], _scope_callback("capture")),
+    McpTool("self.microscope.get_status",
+            "查询智能显微镜状态：当前玻片、载物台高度、电池、是否在运行，不会让显微镜动",
+            [], _scope_callback("status")),
     McpTool("self.camera.take_photo",
             "拍摄设备摄像头前的画面并回答问题。用户让你看看、识别物品或描述眼前场景时调用；question 是关于照片的问题。",
             [Property("question", "string")], _tool_camera_take_photo),
@@ -2414,6 +2445,7 @@ def main():
                    ("camera/light", hardware.close)]
         if _vision_siot_bridge is not None:cleanup.insert(0,("SIoT vision relay",_vision_siot_bridge.stop))
         if _siot_tools is not None:cleanup.insert(0,("SIoT tools",_siot_tools.stop))
+        if _scope_tools is not None:cleanup.insert(0,("Microscope tools",_scope_tools.stop))
         if external_io is not None:
             cleanup.insert(0, ("external I/O", external_io.close))
         for name, close in cleanup:

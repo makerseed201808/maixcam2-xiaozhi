@@ -96,7 +96,8 @@ class SiotMcpTests(unittest.IsolatedAsyncioTestCase):
             names.extend(t['name'] for t in result['tools'])
             cursor = result.get('nextCursor', '')
             if not cursor:break
-        self.assertEqual(len(names), 46)
-        self.assertEqual(len(set(names)), 46)
+        self.assertEqual(len(names), 50)          # 46 + 4 个显微镜工具（feature/microscope）
+        self.assertEqual(len(set(names)), 50)
         self.assertEqual(sum(n.startswith('self.siot.') for n in names), 17)
+        self.assertEqual(sum(n.startswith('self.microscope.') for n in names), 4)
         await server.close()
