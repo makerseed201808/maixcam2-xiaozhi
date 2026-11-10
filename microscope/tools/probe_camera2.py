@@ -26,7 +26,7 @@ try:
             cam.close()
         print(variant, out[variant], flush=True)
     # 2. 更高分辨率：换像素格式
-    for fmt in ("FMT_YVU420SP", "FMT_BGR888", "FMT_RGB888"):
+    for fmt in ("FMT_YVU420SP",):   # BGR888/RGB888 高分辨率会卡死相机，已移除
         for (w, h) in [(1920, 1080), (2560, 1440)]:
             key = "%s_%dx%d" % (fmt, w, h)
             cam = None
