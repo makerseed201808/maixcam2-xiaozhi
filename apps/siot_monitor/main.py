@@ -563,7 +563,7 @@ class Screen:
 
 def main():
     from maix import app, display, image, touchscreen
-    state=MonitorModel();screen=Screen(state);network=history=None
+    state=MonitorModel();screen=Screen(state);network=history=None;media_control=None
     stop=threading.Event();clicks=queue.Queue(maxsize=16)
     def stop_signal(signum,frame):
         stop.set()
@@ -604,8 +604,15 @@ def main():
         except Exception:
             state.connection_text='连接配置不可用'
             screen.notice='请检查 /etc/siot/monitor.json 和服务状态'
+        try:
+            from mcp_control import MediaControlServer
+            media_control=MediaControlServer();media_control.start()
+        except Exception:
+            media_control=None
+            screen.notice='媒体语音控制未启用；触屏功能仍可使用'
         dirty=True;last_draw=0.;preview_done=False;media_topic=None;last_media_status=0.;profile=[]
         while not stop.is_set() and not app.need_exit():
+            if media_control and media_control.drain(screen,network):dirty=True
             if network and state.selected_topic!=media_topic:
                 media_topic=state.selected_topic;network.set_media_topic(media_topic);screen.last_media_payload=None
             for _ in range(16):
@@ -680,6 +687,7 @@ def main():
             if Path('/tmp/siot-monitor-capture').exists():dirty=True
             stop.wait(.01 if screen.page=='media_view' else .02)
     finally:
+        if media_control:media_control.close()
         app.set_exit_flag(True)
         stop.set();reader.join(timeout=2)
         try:screen.stop_media()

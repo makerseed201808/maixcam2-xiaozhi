@@ -3,13 +3,13 @@
 把 Sipeed MaixCAM2 变成一台真正可用的小智（XiaoZhi）语音助手：**语音唤醒 → 对话 → 连续多轮 → 屏幕弹窗**。
 协议实现对齐 [py-xiaozhi](https://github.com/huangjunsen0406/py-xiaozhi) v2.1.2。
 
-本地开发版现有 **29 个 MCP 工具**，包含摄像头视觉问答、补光灯、板载外设、IMU实时显示与陀螺仪校准、受控外部I/O。详见 [MCP 功能清单](docs/MCP_CAPABILITIES.md) 和 [2026-10-25 开发汇总](docs/DEVELOPMENT_SUMMARY_2026-10-25.md)。外接I/O实物通信仍待验证。
+本地源码现有 **46 个 MCP 工具**：原有29项小智/硬件工具，加上17项SIoT主题、历史、订阅、媒体和设备反馈接口。**2026-10-28已按用户要求完整部署**；状态查询与主题列表真机通过，其余专项仍待验收，见[更新记录](docs/SIOT_STATUS_FIX_2026-10-28.md)。详见 [MCP 功能清单](docs/MCP_CAPABILITIES.md)、[SIoT完整使用说明与验收清单](docs/SIOT_MCP.md) 和 [设备命令协议](docs/SIOT_DEVICE_PROTOCOL.md)。外接I/O实物通信仍待验证。
 
 当前交互：语音唤醒，或在左上角圆标持续按住2秒；X结束当前对话。普通触屏不再唤醒。扬声器音量/静音仅缩放播放PCM，不修改麦克风增益。
 
 **SIoT 已可直接部署在 MaixCAM2 上作为局域网服务器，无需 PC 常驻。** 配套触屏监控支持主题管理、消息编辑、数字图表、图片和连续画面，以及小智拍照原图与云识别结果转发。详见 [SIoT 部署](docs/SIOT_DEPLOYMENT.md)、[图像传输与协议](docs/SIOT_MEDIA.md) 和 [监控 App](apps/siot_monitor/README.md)。
 
-离线双模型、可视测试 App 和单线程唤醒优化仍属于实验；**离线模型/App MCP、通用 SIoT 发布订阅 MCP、运动识别与检测结果分发尚未实现**。已实现的拍照转发不等同于这些功能。源码见 [可视测试 App](examples/vision_model_test/) 与 [性能探针](tools/benchmarks/)，后续事项见 [NEXT_STEPS](docs/NEXT_STEPS.md)。
+离线双模型、可视测试 App 和单线程唤醒优化仍属于实验；**离线模型/App MCP、运动识别与检测结果分发尚未实现**。SIoT设备反馈接口已完成主机模拟闭环，ESP32实际动作尚未联调。源码见 [可视测试 App](examples/vision_model_test/) 与 [性能探针](tools/benchmarks/)，后续事项见 [NEXT_STEPS](docs/NEXT_STEPS.md)。
 
 ### 当前开发进度（2026-10-27）
 
@@ -21,6 +21,7 @@
 | 触屏监控 | 主题新建/二次确认删除、上下滑动、完整日期时间、退格输入、数字图表；清空数据保留主题，API 已验证，完整触屏流程待补验 |
 | 图像/视频 | 主题收图、本机摄像头、局域网 HTTP/MJPEG 共享与 HTTP/RTSP 接收；当前 Mind+ Data URL 连续显示已确认，用户反馈媒体部分基本可用 |
 | 拍照识别转发 | 原图与云识别结果通过相同 capture_id 关联，原 JPEG 字节不变；已验证真实拍照→云识别→MQTT 链路 |
+| SIoT完整MCP扩展 | 17项源码及自动化测试；媒体控制需先打开监控App，二次确认用于删除/清空；已于2026-10-28部署，分项真机验收待继续 |
 
 连续画面提供 JSON / Base64 两种格式及 2 / 5 / 10 fps 目标速率，默认 5 fps。Mind+“网络图片”请选择 Base64（完整 `data:image/jpeg;base64,...`）。实时画面为 **320×240、JPEG quality 75**；小智拍照为 **640×480**。连续图片不保存历史，SIoT 管理网页的历史列表为空不能据此判断没有发送。
 
@@ -125,7 +126,7 @@ python -m unittest discover -s tests
 git diff --check
 ```
 
-2026-10-27 主机回归运行 391 项，389 项通过、2 项平台相关跳过。主机测试覆盖协议、队列、消息合并、媒体解析、资源所有权与交互逻辑；不能代替设备驱动、真实触屏、语音或端到端性能验收。设备实测与未验证项见 [SIoT 媒体说明](docs/SIOT_MEDIA.md#当前实测与仍待验证)。
+2026-11-10 主机回归运行496项，488项通过、8项平台相关跳过；媒体控制专项在本机WSL运行22项全部通过，覆盖真实Unix socket。主机测试覆盖协议、队列、消息合并、媒体解析、资源所有权与交互逻辑，不能替代设备驱动、真实触屏、语音或端到端性能验收。历史设备实测见 [SIoT媒体说明](docs/SIOT_MEDIA.md#当前实测与仍待验证)，新扩展待验项目见 [SIoT MCP](docs/SIOT_MCP.md)。
 
 ---
 

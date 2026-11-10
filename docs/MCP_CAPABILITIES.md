@@ -1,8 +1,25 @@
 # 当前设备的小智 MCP 功能清单
 
-核对日期：2026-10-25。设备：MaixCAM2 `maixcam2-test-device`。板载外设接入版本已部署，当前共 29 个工具。
+更新日期：2026-11-10。原有29项之外新增17项SIoT工具，总数46，已于2026-10-28完整部署。状态、目录及简称主题创建已真机验证，其他专项仍待验收。详见 [SIoT MCP](SIOT_MCP.md) 和 [部署记录](SIOT_STATUS_FIX_2026-10-28.md)。
 
-这29项尚未全部完成物理外设验证，也未覆盖整机所有硬件能力，详见 [硬件MCP覆盖检查](HARDWARE_MCP_COVERAGE.md)。
+原有29项尚未全部完成物理外设验证，也未覆盖整机所有硬件能力，详见 [硬件MCP覆盖检查](HARDWARE_MCP_COVERAGE.md)。
+
+## SIoT 新增 17 个工具（已部署，分项验收）
+
+| 工具 | 输入 | 边界 |
+|---|---|---|
+| `self.siot.get_status` | 无 | 查询本机配置与 MQTT 连接，不证明接收设备在线 |
+| `self.siot.list_topics` | `limit`、`offset` | 服务器登记主题与分页，不混淆客户端订阅 |
+| `self.siot.publish` | `topic`、`message`、`save=false` | 最多4096字节；可请求历史保存，broker确认不等于数据库/执行器确认 |
+| `self.siot.read_latest` | `topic`、`source=auto` | 明确区分实时/缓存/历史及时间 |
+| `self.siot.get_history` | `topic`、分页和Unix秒时间范围 | 有界历史文本，标记截断及时间 |
+| `self.siot.subscribe` / `unsubscribe` / `list_subscriptions` | 完整主题或无参数 | 显式监听管理，最多16个精确主题 |
+| `self.siot.create_topic` | 完整主题 | 当前账号下幂等创建 |
+| `self.siot.clear_history` / `delete_topic` | 完整主题、确认令牌 | 二次确认、同会话/动作/主题/ID、单次使用；清空保留监听 |
+| `self.siot.media.get_status` / `start` / `stop` / `show` | 来源、主题/地址、格式、帧率 | 复用已打开监控App，主线程应用，不另抢摄像头/屏幕 |
+| `self.siot.device.list_devices` / `command` | 登记别名、动作、JSON参数、超时 | 先订阅再发送，匹配设备ID/命令ID；超时未知，不重试 |
+
+完整逐项参数与语音示例见 [SIoT使用说明](SIOT_MCP.md)。
 
 ## 调用方式
 

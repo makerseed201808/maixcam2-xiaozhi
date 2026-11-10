@@ -41,8 +41,9 @@ def main():
     hardware=base/'hardware_tools.py'
     assert hashlib.sha256(hardware.read_bytes().replace(b'\r\n',b'\n')).hexdigest()==a.expected_hardware_sha256,'Installed hardware adapter differs from the known baseline'
     files=['main.py','model.py','numeric_chart.py','mqtt_client.py','media_session.py','media_viewer.py',
-           'media_publisher.py','lan_camera_server.py','camera_preview.py','camera_worker.py','launch.py','app.yaml']
-    service_files=['xiaozhi_service.py','ui_ownership.py','camera_ownership.py','hardware_tools.py','vision_siot.py']
+           'media_publisher.py','lan_camera_server.py','camera_preview.py','camera_worker.py','mcp_control.py','launch.py','app.yaml']
+    service_files=['xiaozhi_service.py','ui_ownership.py','camera_ownership.py','hardware_tools.py','vision_siot.py',
+                   'siot_tools.py','siot_topic_catalog.py','siot_api.py','siot_devices.py','siot_media_control.py']
     for n in files:
         assert (a.stage/'apps/siot_monitor'/n).is_file(),n
         if n.endswith('.py'):compile((a.stage/'apps/siot_monitor'/n).read_bytes(),n,'exec')

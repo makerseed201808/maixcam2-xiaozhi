@@ -1,5 +1,7 @@
 # MaixCAM2 独立 SIoT 服务与触屏监控
 
+2026-10-27新增的17项SIoT MCP源码与自动化测试见 [使用说明](SIOT_MCP.md)。2026-10-28已完整部署；状态、目录和简称创建已验证，其余专项待验收。后续升级须同步服务端 `siot_api.py`、`siot_tools.py`、`siot_topic_catalog.py`、`siot_devices.py`、`siot_media_control.py` 及 `xiaozhi_service.py`，同时同步监控App的 `main.py` 与 `mcp_control.py`；只更新小智服务不能启用媒体IPC。初装器已包含这些文件，仍不用于覆盖已有安装。升级前备份、核对已安装版本，遵守显示先于音频的启动顺序。
+
 更新：2026-10-26。服务器运行在 MaixCAM2 上，PC 只是可选的浏览器或 MQTT 客户端。设备供电并接入局域网后，SIoT 收发与本机触屏监控不依赖 PC 或互联网；云端小智对话仍需外网。USB 网络地址仅在连接 PC 时适用。
 
 ## 最新界面方案与验证状态

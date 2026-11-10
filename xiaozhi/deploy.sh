@@ -31,6 +31,11 @@ cp -f "$SRC/service/ui_render.py"      /root/xiaozhi/
 cp -f "$SRC/service/hardware_tools.py" /root/xiaozhi/
 cp -f "$SRC/service/camera_ownership.py" /root/xiaozhi/
 cp -f "$SRC/service/vision_siot.py" /root/xiaozhi/
+cp -f "$SRC/service/siot_tools.py" /root/xiaozhi/
+cp -f "$SRC/service/siot_topic_catalog.py" /root/xiaozhi/
+cp -f "$SRC/service/siot_api.py" /root/xiaozhi/
+cp -f "$SRC/service/siot_devices.py" /root/xiaozhi/
+cp -f "$SRC/service/siot_media_control.py" /root/xiaozhi/
 cp -f "$SRC/service/ui_feedback.py"    /root/xiaozhi/
 cp -f "$SRC/service/ui_ownership.py"   /root/xiaozhi/
 cp -f "$SRC/service/peripheral_tools.py" /root/xiaozhi/

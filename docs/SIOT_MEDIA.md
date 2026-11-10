@@ -94,7 +94,7 @@ HTTP 单张图片不会自动变成视频；连续画面需要 MJPEG、RTSP 或�
 
 `xiaozhi/service/vision_siot.py` 已接入原有拍照 MCP。拍到原始 JPEG 后，先向图片主题发布一次；云端识别结束后，再用**同一 `capture_id`、同一份原始 JPEG 字节**发布带 `recognition` 的图片更新，同时向结果主题发布 `vision_result`。网络发布由独立工作线程完成，原拍照 MCP 不等待 SIoT 发送确认，也不改变原来的云识别返回值；配置缺失或 SIoT 失败不应使原云识别调用失败。
 
-默认主题为 `username/vision/image` 与 `username/vision/result`，可在 `/etc/siot/monitor.json` 配置 `vision_image_topic`、`vision_result_topic`。小智服务配置 `siot_vision_publish: false` 可关闭该转发。不要将此功能误认为已经开放了通用 SIoT 发布/订阅 MCP。
+默认主题为 `username/vision/image` 与 `username/vision/result`，可在 `/etc/siot/monitor.json` 配置 `vision_image_topic`、`vision_result_topic`。小智服务配置 `siot_vision_publish: false` 可关闭该转发。这条自动转发链路独立于后续新增的 [SIoT MCP](SIOT_MCP.md)：其中publish处理短文本，media接口控制监控App图片收发；新扩展已于2026-10-28部署，专项验收仍需继续。
 
 图片信封沿用 `type`、`mime`、`encoding`、`timestamp`、`width`、`height`、`data`，另带 `capture_id`、`question`、`status`；云端完成后的更新新增 `recognition`。它使用 `capture_id` 关联照片，不使用连续摄像头的 `sequence` 字段。结果主题格式如下：
 
