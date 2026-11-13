@@ -38,7 +38,10 @@ class ScreenView(object):
 
     def show(self, frame):
         image = self._image
-        img = frame.to_format(image.Format.FMT_RGB888) if frame.format() != image.Format.FMT_RGB888 else frame
+        img = frame
+        if img.format() != image.Format.FMT_RGB888:
+            # 正常由相机 RGB888 屏幕通道供图；万一拿到 YUV（板上不能直接转 RGB），退回灰度画面
+            img = img.to_format(image.Format.FMT_GRAYSCALE).to_format(image.Format.FMT_RGB888)
         img = img.resize(self.w, self.h, image.Fit.FIT_CONTAIN)
         white, dark = image.Color.from_rgb(255, 255, 255), image.Color.from_rgb(0, 0, 0)
         x, y, w, h = EXIT_BOX

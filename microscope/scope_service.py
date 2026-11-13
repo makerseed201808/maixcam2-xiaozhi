@@ -208,12 +208,12 @@ class ScopeService(object):
                 self.handle_capture(data)
             elif live:
                 try:
-                    img = self.session.frame(fresh=False)
                     if self._viewers > 0:
+                        img = self.session.frame(fresh=False)
                         self._set_preview(img, self.session.frame_no)
                     if self.screen is not None:
                         self.screen.note = ""
-                        self.screen.show(img)
+                        self.screen.show(self.session.screen_frame())
                 except CameraBusy:
                     if self.screen is not None:
                         self.screen.message("相机正被其他程序占用，稍候自动重试…")
@@ -375,7 +375,7 @@ def main():
         sys.path.insert(0, "/root/xiaozhi")
         from camera_ownership import CameraLease
         from scope_camera import MaixBackend
-        backend, lease = MaixBackend(a.width, a.height), CameraLease
+        backend, lease = MaixBackend(a.width, a.height, screen=(640, 360) if a.screen else None), CameraLease
     session = CameraSession(backend, lease_factory=lease, idle_s=a.idle)
     base = "http://%s:%d" % (lan_address(), a.port)
     service = ScopeService(session, CaptureStore(a.captures), http_base=base, log=log)

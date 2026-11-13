@@ -51,6 +51,9 @@ class FakeBackend(object):
     def drop_buffered(self):
         pass
 
+    def read_screen(self):
+        return self.read()
+
     def read_full(self):
         return self.read()
 
@@ -95,11 +98,13 @@ class MaixBackend(object):
     - 锁定曝光：切手动模式并写回当前曝光时间即可保持亮度；写回 gain() 会改变增益（单位不一致），不写。
     """
 
-    def __init__(self, width=2560, height=1440, buff_num=2, preview=(1280, 720)):
+    def __init__(self, width=2560, height=1440, buff_num=2, preview=(1280, 720), screen=None):
         self.width, self.height, self.buff_num = width, height, buff_num
         self.preview = preview
+        self.screen = screen        # 例如 (640, 360)：另开一个 RGB888 小通道给屏幕显示
         self.cam = None
         self.ch = None
+        self.ch_screen = None
 
     def open(self):
         from maix import camera, image
@@ -107,6 +112,11 @@ class MaixBackend(object):
         self.cam = camera.Camera(self.width, self.height, image.Format.FMT_YVU420SP, buff_num=self.buff_num)
         self.ch = self.cam.add_channel(self.preview[0], self.preview[1], image.Format.FMT_YVU420SP,
                                        buff_num=self.buff_num)
+        if self.screen:
+            # YVU420SP 帧在板上不能 to_format(RGB888)（"not support format"，2026-11-13 实测），
+            # 软件转换 640×360 要约 100 ms；硬件 RGB888 小通道 640×360 实测可用，绘字也正常。
+            self.ch_screen = self.cam.add_channel(self.screen[0], self.screen[1], image.Format.FMT_RGB888,
+                                                  buff_num=self.buff_num)
         self.cam.exp_mode(camera.AeMode.Auto)
         self.cam.awb_mode(camera.AwbMode.Auto)
         t = time.monotonic()
@@ -118,6 +128,11 @@ class MaixBackend(object):
                 break
 
     def close(self):
+        if self.ch_screen is not None:
+            try:
+                self.ch_screen.close()
+            finally:
+                self.ch_screen = None
         if self.ch is not None:
             try:
                 self.ch.close()
@@ -130,6 +145,13 @@ class MaixBackend(object):
     def read(self):
         """预览/清晰度通道（1280×720）。"""
         img = self.ch.read()
+        if img is None:
+            raise RuntimeError("相机没有返回画面")
+        return img
+
+    def read_screen(self):
+        """屏幕通道（RGB888 小图）；没开屏幕通道时退回预览通道。"""
+        img = (self.ch_screen or self.ch).read()
         if img is None:
             raise RuntimeError("相机没有返回画面")
         return img
@@ -245,6 +267,13 @@ class CameraSession(object):
             img = self.backend.read()
             self.frame_no += 1
             return img
+
+    def screen_frame(self):
+        """给本机屏幕显示的一帧（MaixBackend 为 RGB888 小通道）。"""
+        with self._lock:
+            self._ensure_open()
+            self.touch()
+            return self.backend.read_screen()
 
     def lock_exposure(self):
         with self._lock:
