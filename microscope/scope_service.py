@@ -105,6 +105,7 @@ class ScopeService(object):
         self._focus_session_t = 0.0
         self.jobs = queue.Queue()
         self.stop_file = None
+        self.screen = None          # --screen 时为 ScreenView：一直出画面到 MaixCAM2 屏幕
 
     # ---------- 清晰度 ----------
     def handle_focus(self, msg):
@@ -189,19 +190,33 @@ class ScopeService(object):
                 self.log("[显微服务] 收到停止文件，关闭相机后退出")
                 os.remove(self.stop_file)
                 break
+            if self.screen is not None and self.screen.should_exit():
+                self.log("[显微服务] 屏幕上点了退出，关闭相机后退出")
+                break
+            live = self._viewers > 0 or self.screen is not None
             try:
-                kind, data = self.jobs.get(timeout=(1.0 / fps) if self._viewers > 0 else 0.2)
+                kind, data = self.jobs.get(timeout=(1.0 / fps) if live else 0.2)
             except queue.Empty:
                 kind = None
             if kind == "focus":
+                if self.screen is not None:
+                    self.screen.note = "对焦中…"
                 self.handle_focus(data)
             elif kind == "capture":
+                if self.screen is not None:
+                    self.screen.note = "拍照中…"
                 self.handle_capture(data)
-            elif self._viewers > 0:
+            elif live:
                 try:
                     img = self.session.frame(fresh=False)
-                    self._set_preview(img, self.session.frame_no)
+                    if self._viewers > 0:
+                        self._set_preview(img, self.session.frame_no)
+                    if self.screen is not None:
+                        self.screen.note = ""
+                        self.screen.show(img)
                 except CameraBusy:
+                    if self.screen is not None:
+                        self.screen.message("相机正被其他程序占用，稍候自动重试…")
                     time.sleep(1)
                 except Exception as exc:
                     self.log("[预览] %s" % exc)
@@ -347,6 +362,7 @@ def main():
     p.add_argument("--siot-config", default="/etc/siot/monitor.json")
     p.add_argument("--idle", type=float, default=20.0)
     p.add_argument("--fake", action="store_true", help="电脑上用假相机")
+    p.add_argument("--screen", action="store_true", help="同时在 MaixCAM2 屏幕上显示实时画面（显微镜 app 用）")
     a = p.parse_args()
 
     def log(*parts):
@@ -366,6 +382,12 @@ def main():
     service.stop_file = "/tmp/scope_service.stop"   # 停止：touch 这个文件（见 run_scope.sh），保证先关相机再退出
     connect_siot(service, a.siot_config, log)
     stop = threading.Event()
+    # app 关闭时启动器发 SIGTERM：只置停止标志，让主线程照常关相机后退出（强杀相机会导致需重启）
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    if a.screen:
+        from scope_screen import ScreenView
+        service.screen = ScreenView()
     http = make_http(service, a.port)
     threading.Thread(target=http.serve_forever, daemon=True).start()
     log("[显微服务] HTTP %s ，原图目录 %s，相机 %dx%d" % (base, a.captures, a.width, a.height))
@@ -376,6 +398,8 @@ def main():
     finally:
         stop.set()
         session.close()
+        if service.screen is not None:
+            service.screen.close()
         http.shutdown()
 
 

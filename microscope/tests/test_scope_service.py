@@ -108,3 +108,23 @@ def test_http_serves_original_and_preview(svc):
     finally:
         stop.set()
         srv.shutdown()
+
+
+class FakeScreen(object):
+    """屏幕模式测试替身：记录显示的帧，显示 n 帧后模拟点“退出”。"""
+    def __init__(self, n):
+        self.n, self.shown, self.note, self.msgs = n, 0, "", []
+    def show(self, img):
+        self.shown += 1
+    def should_exit(self):
+        return self.shown >= self.n
+    def message(self, s):
+        self.msgs.append(s)
+
+
+def test_screen_mode_shows_frames_without_viewers_and_exits(svc):
+    import threading
+    svc.screen = FakeScreen(5)
+    t = threading.Thread(target=svc.run_jobs, args=(threading.Event(),), kwargs={"fps": 50})
+    t.start(); t.join(10)
+    assert not t.is_alive() and svc.screen.shown >= 5

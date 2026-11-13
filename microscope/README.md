@@ -40,3 +40,10 @@ python3 -m pytest -q microscope/tests    # 电脑上（假相机）
 ## 预览（2.4 的基础）
 
 `http://<MaixCAM2>:8091/stream.mjpg` 1280×720，实测 6.8 帧/秒、每帧约 116 KB；`/preview.jpg` 单帧；`/status.json` 状态。
+
+## “显微镜”app（屏幕实时画面，2026-11-13）
+
+- 位置：`microscope/app/`（`app.yaml`、`launch.py`、`assets/icon.png`），部署到 MaixCAM2 `/maixapp/apps/microscope/`，并在 `/maixapp/apps/app.info` 追加 `[microscope]` 一节（原文件备份在 `/root/app.info.bak_20261113`）。
+- 用法：开机后在桌面点“显微镜”。app 先用停止文件让后台显微服务退出，再以 `scope_service.py --screen` 前台运行：屏幕显示实时画面，左上角“退出”；M10 与网页的对焦、拍照、8091 预览照常可用。
+- 关闭：点“退出”，或启动器发 SIGTERM。服务先关相机再退出，不强杀相机进程（强杀需重启才能恢复）。
+- 注意：从 ssh 直接运行 `launch.py` 会报 `VO init failed`，因为桌面启动器占着屏幕；必须从桌面点开。

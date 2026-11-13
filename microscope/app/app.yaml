@@ -1,0 +1,9 @@
+id: microscope
+name: Microscope
+name[zh]: 显微镜
+version: 0.1.0
+author: Smart microscope project
+desc: Live microscope view on screen; serves focus/capture for M10 and web
+desc[zh]: 屏幕实时显示显微画面，同时为 M10 和网页提供对焦、拍照
+exec: launch.py
+icon: assets/icon.png
