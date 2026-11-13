@@ -120,7 +120,11 @@ class ScopeService(object):
                     self.session.lock_exposure()
                 self._focus_session_t = time.time()
                 scores, lights, frame_no = [], [], None
-                for _ in range(self.samples):
+                try:
+                    n = max(1, min(5, int(msg.get("n") or self.samples)))   # 粗扫可只要 1 帧（提速）
+                except (TypeError, ValueError):
+                    n = self.samples
+                for _ in range(n):
                     img = self.session.frame(fresh=True)
                     frame_no = self.session.frame_no
                     arr = self.session.backend.to_array(img, self.analysis_width)
