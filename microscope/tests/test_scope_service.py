@@ -34,6 +34,7 @@ def test_focus_scores_rise_then_fall(svc):
         svc.focus.z = z
         r = svc.handle_focus({"seq": i + 1, "z": int(z * 10000)})
         assert r["seq"] == i + 1 and "score" in r
+        assert 0 <= r["brightness"] <= 255                  # 回报观察区亮度，便于发现挡光等异常帧
         scores.append(r["score"])
     peak = scores.index(max(scores))
     assert peak == 3

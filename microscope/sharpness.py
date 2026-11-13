@@ -33,6 +33,11 @@ def laplacian_var(arr, roi=DEFAULT_ROI, step=2):
     return float(lap.var())
 
 
+def roi_mean(arr, roi=DEFAULT_ROI, step=4):
+    """观察区平均亮度（0–255）。随清晰度一起回报：挡光或背光掉了时亮度骤降，便于发现异常帧。"""
+    return float(gray(crop(arr, roi))[::step, ::step].mean())
+
+
 def median(values):
     v = sorted(values)
     n = len(v)

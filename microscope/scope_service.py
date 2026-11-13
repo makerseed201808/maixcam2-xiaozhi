@@ -32,7 +32,7 @@ from socketserver import ThreadingMixIn
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from scope_camera import CameraBusy, CameraSession  # noqa: E402
-from sharpness import DEFAULT_ROI, laplacian_var, median  # noqa: E402
+from sharpness import DEFAULT_ROI, laplacian_var, median, roi_mean  # noqa: E402
 
 TOPICS = {"focus_req": "siot/scope_focus_req", "focus": "siot/scope_focus", "capture": "siot/scope_capture"}
 CAP_RE = re.compile(r"^cap-\d{6}$")
@@ -119,19 +119,21 @@ class ScopeService(object):
                     self.session.frame(fresh=True)
                     self.session.lock_exposure()
                 self._focus_session_t = time.time()
-                scores, frame_no = [], None
+                scores, lights, frame_no = [], [], None
                 for _ in range(self.samples):
                     img = self.session.frame(fresh=True)
                     frame_no = self.session.frame_no
                     arr = self.session.backend.to_array(img, self.analysis_width)
                     scores.append(laplacian_var(arr, self.roi))
+                    lights.append(roi_mean(arr, self.roi))
                     self._set_preview(img, frame_no)
             score = median(scores)
             ms = int((time.time() - t0) * 1000)
             self.stats["focus"] += 1
             self.stats["last_focus_ms"] = ms
             reply = {"seq": seq, "score": round(score, 2), "frame": frame_no, "ms": ms,
-                     "samples": [round(s, 2) for s in scores], "t": round(time.time(), 3)}
+                     "samples": [round(s, 2) for s in scores], "brightness": round(median(lights), 1),
+                     "t": round(time.time(), 3)}
         except Exception as exc:
             self.stats["focus_err"] += 1
             reply = {"seq": seq, "error": str(exc), "t": round(time.time(), 3)}

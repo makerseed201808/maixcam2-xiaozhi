@@ -24,3 +24,11 @@ def test_flat_image_is_zero_and_rgb_ok():
 
 def test_median():
     assert median([3, 1, 2]) == 2 and median([1, 2, 3, 10]) == 2.5
+
+
+def test_roi_mean_tracks_brightness():
+    import numpy as np
+    from sharpness import roi_mean
+    dark = np.full((90, 160, 3), 30, np.uint8)
+    bright = np.full((90, 160, 3), 200, np.uint8)
+    assert abs(roi_mean(dark) - 30) < 0.5 and abs(roi_mean(bright) - 200) < 0.5
