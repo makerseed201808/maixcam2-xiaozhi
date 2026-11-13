@@ -32,7 +32,7 @@ from socketserver import ThreadingMixIn
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from scope_camera import CameraBusy, CameraSession  # noqa: E402
-from sharpness import DEFAULT_ROI, laplacian_var, median, roi_mean  # noqa: E402
+from sharpness import DEFAULT_ROI, median, roi_mean, tenengrad_small  # noqa: E402
 
 TOPICS = {"focus_req": "siot/scope_focus_req", "focus": "siot/scope_focus", "capture": "siot/scope_capture"}
 CAP_RE = re.compile(r"^cap-\d{6}$")
@@ -124,7 +124,7 @@ class ScopeService(object):
                     img = self.session.frame(fresh=True)
                     frame_no = self.session.frame_no
                     arr = self.session.backend.to_array(img, self.analysis_width)
-                    scores.append(laplacian_var(arr, self.roi))
+                    scores.append(tenengrad_small(arr, self.roi))
                     lights.append(roi_mean(arr, self.roi))
                     self._set_preview(img, frame_no)
             score = median(scores)

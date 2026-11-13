@@ -1,4 +1,4 @@
-"""清晰度计算（开发方案 2.3）：固定观察区灰度图的拉普拉斯方差。
+"""清晰度计算（开发方案 2.3）：自动对焦用 tenengrad_small（缩小后 Sobel 梯度，抗噪）；laplacian_var 保留作对比。
 
 只依赖 numpy，可在电脑上测试。输入为 H×W×3（RGB）或 H×W 的 uint8 数组。
 观察区 roi = (x, y, w, h)，按画面比例给出（0–1），默认取中央 50%×50%。
@@ -31,6 +31,25 @@ def laplacian_var(arr, roi=DEFAULT_ROI, step=2):
     g = gray(crop(arr, roi))[::step, ::step]
     lap = (4 * g[1:-1, 1:-1] - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:])
     return float(lap.var())
+
+
+def tenengrad_small(arr, roi=DEFAULT_ROI, factor=4):
+    """抗噪清晰度：观察区先按 factor×factor 块求平均（缩小），再算梯度平方均值，除以平均亮度。
+
+    2026-11-13 真机：画面噪点多时 laplacian_var 被噪声主导，自动对焦停在离焦位置（sharp.py 实测 12.9）；
+    缩小 4 倍再算梯度能正确找到峰值（3720 步，86）。除以亮度让曝光小幅变化时分数可比。
+    """
+    g = gray(crop(arr, roi))
+    f = max(1, int(factor))
+    h, w = (g.shape[0] // f) * f, (g.shape[1] // f) * f
+    if h < 3 * f or w < 3 * f:
+        f = 1
+        h, w = g.shape[0], g.shape[1]
+    s = g[:h, :w].reshape(h // f, f, w // f, f).mean(axis=(1, 3))
+    # 3×3 Sobel
+    gx = (s[:-2, 2:] + 2 * s[1:-1, 2:] + s[2:, 2:]) - (s[:-2, :-2] + 2 * s[1:-1, :-2] + s[2:, :-2])
+    gy = (s[2:, :-2] + 2 * s[2:, 1:-1] + s[2:, 2:]) - (s[:-2, :-2] + 2 * s[:-2, 1:-1] + s[:-2, 2:])
+    return float((gx * gx + gy * gy).mean() / max(1.0, float(s.mean())))
 
 
 def roi_mean(arr, roi=DEFAULT_ROI, step=4):

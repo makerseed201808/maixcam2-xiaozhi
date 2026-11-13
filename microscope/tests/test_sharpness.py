@@ -32,3 +32,21 @@ def test_roi_mean_tracks_brightness():
     dark = np.full((90, 160, 3), 30, np.uint8)
     bright = np.full((90, 160, 3), 200, np.uint8)
     assert abs(roi_mean(dark) - 30) < 0.5 and abs(roi_mean(bright) - 200) < 0.5
+
+
+def test_tenengrad_small_robust_to_heavy_noise():
+    """噪声大时：清晰图案 + 噪声 应高于 模糊图案 + 噪声（laplacian_var 在这种情况下会反过来）。"""
+    import numpy as np
+    from sharpness import tenengrad_small, laplacian_var
+    rng = np.random.default_rng(0)
+    yy, xx = np.mgrid[0:360, 0:640]
+    sharp = np.where(((xx // 40) + (yy // 40)) % 2 == 0, 160.0, 80.0)
+    k = 31
+    pad = np.pad(sharp, k // 2, mode="edge")
+    c = pad.cumsum(0).cumsum(1)
+    c = np.pad(c, ((1, 0), (1, 0)))
+    blur = (c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]) / (k * k)
+    noisy = lambda a, sd: np.clip(a + rng.normal(0, sd, a.shape), 0, 255).astype(np.uint8)
+    a_sharp, a_blur = noisy(sharp, 25), noisy(blur, 45)        # 模糊帧噪声更大（增益更高）
+    assert tenengrad_small(a_sharp) > 2 * tenengrad_small(a_blur)
+    assert laplacian_var(a_blur) > laplacian_var(a_sharp)      # 旧指标被噪声误导
