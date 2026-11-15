@@ -63,3 +63,24 @@ def test_ui_lease_partial_scope(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         UiLease(path, scopes=("screen",))
+
+
+def test_job_banner_running_done_and_expiry(tmp_path):
+    import json
+    import os
+    from scope_screen import JobBanner
+    p = tmp_path / "job.json"
+    t = [1000.0]
+    jb = JobBanner(str(p), clock=lambda: t[0])
+    jb.refresh()
+    assert jb.line() is None
+    p.write_text(json.dumps({"status": "running", "progress": "步骤 5/12 自动对焦", "photos": 1, "total": 4}), encoding="utf-8")
+    jb.refresh()
+    assert jb.line() == ("自动任务  步骤 5/12 自动对焦  已拍 1/4 张", "run")
+    p.write_text(json.dumps({"status": "done", "progress": "全部完成", "photos": 4, "total": 4, "ended_at": 995.0}),
+                 encoding="utf-8")
+    os.utime(p, ns=(1, 2))                        # 保证 mtime 变化
+    jb.refresh()
+    assert jb.line() == ("自动任务完成  已拍 4/4 张", "ok")
+    t[0] = 1030.0
+    assert jb.line() is None                      # 结束 30 秒后不再显示

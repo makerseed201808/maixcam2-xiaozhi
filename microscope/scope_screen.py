@@ -15,6 +15,8 @@ import time
 FONT_PATH = "/maixapp/share/font/SourceHanSansCN-Regular.otf"
 EXIT_BOX = (0, 0, 120, 64)        # 屏幕坐标：x, y, w, h
 POPUP_PATH = "/root/xiaozhi/popup.rgba"
+JOB_PATH = "/tmp/microscope_job.json"   # 网页后端自动任务写的状态（编排任务 / 一键巡检）
+JOB_END_SHOW_S = 30                     # 任务结束后提示显示多久
 XZ_CMD = "/tmp/xz_cmd"
 
 
@@ -67,6 +69,48 @@ class XiaozhiPopup(object):
         return x.to_format(image.Format.FMT_RGB888)
 
 
+class JobBanner(object):
+    """读自动任务状态文件，给出屏幕底部一行提示 (文字, 颜色名)；没有要显示的返回 None。
+    进行中：一直显示进度；结束（完成 / 失败 / 已停止）：显示 JOB_END_SHOW_S 秒。"""
+
+    END = {"done": ("自动任务完成", "ok"), "failed": ("自动任务失败", "bad"),
+           "cancelled": ("自动任务已停止", "warn"), "interrupted": ("自动任务中断", "warn")}
+
+    def __init__(self, path=JOB_PATH, clock=time.time):
+        self.path, self.clock = path, clock
+        self._sig, self.job = None, None
+
+    def refresh(self):
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            self._sig, self.job = None, None
+            return
+        sig = (st.st_mtime_ns, st.st_size)
+        if sig == self._sig:
+            return
+        try:
+            import json
+            with open(self.path, encoding="utf-8") as f:
+                self.job = json.load(f)
+            self._sig = sig
+        except (OSError, ValueError):
+            pass                                    # 正在写，下次再读
+
+    def line(self):
+        j = self.job
+        if not j:
+            return None
+        photos = "已拍 %s/%s 张" % (j.get("photos", 0), j.get("total") or "?")
+        if j.get("status") in ("running", "waiting"):
+            return "自动任务  %s  %s" % (j.get("progress") or "", photos), "run"
+        if j.get("status") in self.END and j.get("ended_at") and self.clock() - j["ended_at"] < JOB_END_SHOW_S:
+            title, color = self.END[j["status"]]
+            tail = ("：" + j["error"]) if j.get("error") else ""
+            return ("%s  %s%s" % (title, photos, tail))[:60], color
+        return None
+
+
 class ScreenView(object):
     def __init__(self, title="显微镜"):
         from maix import app, display, image, touchscreen
@@ -83,6 +127,7 @@ class ScreenView(object):
             pass
         self._exit = False
         self.popup = XiaozhiPopup(image)
+        self.jobs = JobBanner()
         self._touch = None            # 弹窗显示时按下的位置（抬起时转给小智）
         self._last_fps_t = time.monotonic()
         self._frames = 0
@@ -120,6 +165,16 @@ class ScreenView(object):
             self._frames, self._last_fps_t = 0, now
         info = "%s  %.0f 帧/秒  %s" % (self.title, self.fps, self.note)
         self._text(img, x + w + 12, y + 16, info, white)
+        try:
+            self.jobs.refresh()
+            b = self.jobs.line()
+            if b:                                   # 底部一行：进行中蓝色，完成绿色，失败红色，停止灰色
+                text, kind = b
+                bg = {"run": (20, 70, 140), "ok": (20, 110, 50), "bad": (160, 30, 30)}.get(kind, (80, 80, 80))
+                img.draw_rect(0, self.h - 48, self.w, 48, image.Color.from_rgb(*bg), thickness=-1)
+                self._text(img, 12, self.h - 40, text, white)
+        except Exception:
+            pass
         self.disp.show(img)
 
     def should_exit(self):
