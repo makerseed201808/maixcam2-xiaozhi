@@ -7,6 +7,9 @@
 小智对话弹窗：小智服务把弹窗画成 /root/xiaozhi/popup.rgba（640×480 RGBA）。桌面靠注入库叠加，
 本 app 不带注入库（会卡显示驱动），所以这里自己读这张图叠到屏幕画面上；弹窗出现时触摸转给小智
 （写 /tmp/xz_cmd 的 TAP，点 X 关闭、点喇叭静音），不触发“退出”。网页预览不经过这里，不受影响。
+
+网址二维码（2026-11-15 快速配网）：右上角“网址”按钮。打开 app 后先显示 30 秒，之后点按钮显示 / 隐藏。
+网址和二维码模块从本机网页后端 /api/network/qr.json 取（换网络后地址变了也会跟着变）。
 """
 import os
 import struct
@@ -18,6 +21,9 @@ POPUP_PATH = "/root/xiaozhi/popup.rgba"
 JOB_PATH = "/tmp/microscope_job.json"   # 网页后端自动任务写的状态（编排任务 / 一键巡检）
 JOB_END_SHOW_S = 30                     # 任务结束后提示显示多久
 XZ_CMD = "/tmp/xz_cmd"
+QR_API = "http://127.0.0.1:8000/api/network/qr.json"
+QR_BOX_W = 120                          # 右上角“网址”按钮宽度（高度同“退出”）
+QR_SHOW_FIRST_S = 30
 
 
 def screen_to_raw_touch(x, y):
@@ -111,6 +117,67 @@ class JobBanner(object):
         return None
 
 
+def _fetch_json(url, timeout=3):
+    import json
+    import urllib.request
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # 本机地址不走代理
+    with opener.open(url, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+class WebQr(object):
+    """网页网址与二维码：后台每 period 秒向本机网页后端取一次；visible 控制是否画在屏幕上。"""
+
+    def __init__(self, fetch=_fetch_json, url=QR_API, period=15.0, clock=time.monotonic):
+        self.fetch, self.api, self.period, self.clock = fetch, url, period, clock
+        self.url, self.rows = None, []
+        self.version = 0                  # 网址变了加 1，屏幕据此重画二维码
+        self.shown_until = clock() + QR_SHOW_FIRST_S
+        self.forced = None                # 用户点了按钮：True / False；None = 开头自动显示
+        self._t = None
+
+    @property
+    def visible(self):
+        if self.forced is not None:
+            return self.forced and bool(self.rows)
+        return bool(self.rows) and self.clock() < self.shown_until
+
+    def toggle(self):
+        self.forced = not self.visible
+
+    def refresh(self):
+        """取一次；网页后端没起来时保持旧值。返回网址是否变化。"""
+        try:
+            d = self.fetch(self.api)
+        except Exception:
+            return False
+        url, rows = d.get("url"), d.get("rows") or []
+        if not url or not rows or any(len(r) != len(rows) for r in rows):
+            return False
+        if url == self.url:
+            return False
+        self.url, self.rows = url, rows
+        self.version += 1
+        return True
+
+    def start(self):
+        import threading
+
+        def loop():
+            while True:
+                self.refresh()
+                time.sleep(self.period)
+        self._t = threading.Thread(target=loop, name="web-qr", daemon=True)
+        self._t.start()
+
+    def layout(self, w, h, top=72, margin=16):
+        """二维码画在右侧：返回 (x, y, 每格像素, 含白边的边长)。"""
+        n = len(self.rows)
+        scale = max(2, min(9, (min(h - top - 64, w // 2) // (n + 8))))
+        size = (n + 8) * scale
+        return w - size - margin, top, scale, size
+
+
 class ScreenView(object):
     def __init__(self, title="显微镜"):
         from maix import app, display, image, touchscreen
@@ -133,6 +200,46 @@ class ScreenView(object):
         self._frames = 0
         self.fps = 0.0
         self.note = ""
+        self.qr = WebQr()
+        self.qr.start()
+        self._qr_img = None
+        self._qr_ver = -1
+        self._was_pressed = False
+
+    def _qr_image(self, scale, size):
+        """二维码图层只在网址变化时重画一次（几百个小方块），之后每帧直接贴图。"""
+        image = self._image
+        if self._qr_img is None or self._qr_ver != self.qr.version:
+            img = image.Image(size, size, image.Format.FMT_RGB888)
+            img.draw_rect(0, 0, size, size, image.Color.from_rgb(255, 255, 255), thickness=-1)
+            black = image.Color.from_rgb(0, 0, 0)
+            for r, row in enumerate(self.qr.rows):
+                c = 0
+                while c < len(row):                     # 同一行连续的黑格合成一个矩形
+                    if row[c] == "1":
+                        c0 = c
+                        while c < len(row) and row[c] == "1":
+                            c += 1
+                        img.draw_rect((c0 + 4) * scale, (r + 4) * scale, (c - c0) * scale, scale, black, thickness=-1)
+                    else:
+                        c += 1
+            self._qr_img, self._qr_ver = img, self.qr.version
+        return self._qr_img
+
+    def _draw_qr(self, img):
+        image = self._image
+        white, dark = image.Color.from_rgb(255, 255, 255), image.Color.from_rgb(0, 0, 0)
+        bx = self.w - QR_BOX_W
+        x, y, w, h = EXIT_BOX
+        img.draw_rect(bx, y, QR_BOX_W, h, image.Color.from_rgb(20, 70, 140) if self.qr.visible else dark, thickness=-1)
+        self._text(img, bx + 18, y + 16, "网址", white)
+        if not self.qr.visible:
+            return
+        qx, qy, scale, size = self.qr.layout(self.w, self.h)
+        img.draw_image(qx, qy, self._qr_image(scale, size))
+        label = self.qr.url.replace("http://", "").rstrip("/")
+        img.draw_rect(qx, qy + size, size, 40, dark, thickness=-1)
+        self._text(img, qx + 8, qy + size + 6, label, white)
 
     def _text(self, img, x, y, s, color):
         if self.font:
@@ -165,6 +272,10 @@ class ScreenView(object):
             self._frames, self._last_fps_t = 0, now
         info = "%s  %.0f 帧/秒  %s" % (self.title, self.fps, self.note)
         self._text(img, x + w + 12, y + 16, info, white)
+        try:
+            self._draw_qr(img)
+        except Exception:
+            pass
         try:
             self.jobs.refresh()
             b = self.jobs.line()
@@ -200,6 +311,9 @@ class ScreenView(object):
             x, y, w, h = EXIT_BOX
             if pressed and x <= px < x + w and y <= py < y + h:
                 self._exit = True
+            if pressed and not self._was_pressed and px >= self.w - QR_BOX_W and y <= py < y + h:
+                self.qr.toggle()                    # 按下的一瞬间切换一次，按住不连跳
+            self._was_pressed = bool(pressed)
         except Exception:
             pass
         return self._exit
@@ -220,6 +334,8 @@ class ScreenView(object):
         image = self._image
         img = image.Image(self.w, self.h, image.Format.FMT_RGB888)
         self._text(img, 20, self.h // 2 - 12, s, image.Color.from_rgb(255, 255, 255))
+        if self.qr.url:
+            self._text(img, 20, self.h // 2 + 24, "网页：" + self.qr.url, image.Color.from_rgb(255, 255, 255))
         x, y, w, h = EXIT_BOX
         self._text(img, x + 18, y + 16, "退出", image.Color.from_rgb(255, 255, 255))
         self.disp.show(img)
