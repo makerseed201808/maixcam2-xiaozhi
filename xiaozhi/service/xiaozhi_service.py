@@ -102,6 +102,9 @@ DEFAULT_CFG = {
 # ---------------- 全局状态 ----------------
 class S:
     cfg = {}
+    # 显微镜编排任务确认开始后（start_plan 成功），本轮回复播完就结束会话、回到待唤醒，
+    # 不再开下一轮聆听，免得旁人说话被当成命令（用户 2026-11-15 要求）。
+    end_after_reply = False
     loop = None
     ws = None
     session_id = ""
@@ -761,7 +764,10 @@ def _scope_callback(method):
                     from scope_tools import ScopeTools
                     _scope_tools = ScopeTools()
                 tools = _scope_tools
-            return getattr(tools, method)(**kwargs)
+            res = getattr(tools, method)(**kwargs)
+            if method == "start_plan" and isinstance(res, dict) and res.get("started"):
+                S.end_after_reply = True
+            return res
         return await asyncio.to_thread(execute)
     return invoke
 
@@ -842,7 +848,7 @@ MCP_TOOLS = [
             _scope_callback("prepare_plan")),
     McpTool("self.microscope.start_plan",
             "智能显微镜编排任务（第二步：开始执行）：只有在用户听完复述的步骤、明确说“开始”“确认”“可以”之后才调用；不需要参数，执行最近准备好的清单。"
-            "工具立即返回，任务在后台进行，对话结束也不影响；告诉用户已开始即可，不要等待或反复查询",
+            "工具立即返回，任务在后台进行；告诉用户已开始，并说你这就回到待机、要再找你请重新唤醒。说完后对话会自动结束，不要再提问",
             [], _scope_callback("start_plan")),
     McpTool("self.microscope.job_status",
             "查询智能显微镜自动任务（巡检/编排）的进度或结果：正在第几步、是否完成、拍了几张，不会让显微镜动",
@@ -1936,6 +1942,7 @@ async def session_run(reason="wake"):
             "seg_frames": 0,
             "seg_peak": 0.0,
         }
+        S.end_after_reply = False
         session_mcp = McpServer(ws, lambda: st["session_id"])
 
         vad = Vad(silence_ms=int(S.cfg.get("vad_silence_ms", 650)))
@@ -2176,6 +2183,18 @@ async def session_run(reason="wake"):
                         S.tts_playing = False
                         st["last_tts"] = mono()
                         st["waiting_since"] = 0.0
+                        if S.end_after_reply:
+                            # 编排任务已确认开始：等本地把回复播完（结束会话会清空播放队列），再回到待唤醒
+                            S.end_after_reply = False
+                            t_end = mono() + 15
+                            while mono() < t_end:
+                                with S.play_lock:
+                                    if not S.play_q:
+                                        break
+                                await asyncio.sleep(0.1)
+                            await asyncio.sleep(0.8)       # 声卡里还有几百毫秒没播完
+                            log("编排任务已开始 → 回复播完，结束会话（不再聆听，需重新唤醒）")
+                            return
                         _set_state("listening", "聆听中")
                         await send_listen_start()      # 连续对话：立刻开下一轮
                 elif mtype == "stt":

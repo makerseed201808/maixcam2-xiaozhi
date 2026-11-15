@@ -310,7 +310,8 @@ class ScopeTools(object):
         if code != 200:
             return {"ok": False, "message": "没有开始：%s" % (d.get("error") or "网页后端返回 %s" % code)}
         return {"ok": True, "started": True, "job_id": d.get("job_id"),
-                "message": "已开始任务 %s，共 %d 步，在后台进行，对话结束也会继续。可以随时问我进度，或说停止任务。"
+                "message": "已开始任务 %s，共 %d 步，在后台进行。说完这句我就回到待机，不再听；"
+                           "完成后显微镜屏幕和网页会提示，要查进度或停止任务请重新唤醒我。"
                            % (d.get("job_id"), len(p["steps"]))}
 
     def job_status(self):
