@@ -13,6 +13,7 @@
 start_plan 不带参数，所以中途对话断开、重新唤醒后说“开始”也能接上。
 """
 import itertools
+import os
 import json
 import re
 import threading
@@ -43,6 +44,22 @@ def _http_json(method, url, body=None, timeout=8):
             return e.code, json.loads(e.read().decode("utf-8") or "{}")
         except ValueError:
             return e.code, {}
+
+
+def microscope_running(proc="/proc"):
+    """显微服务（scope_service.py）在跑时它占着摄像头，小智自带的拍照工具打不开相机。"""
+    try:
+        pids = [x for x in os.listdir(proc) if x.isdigit()]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(os.path.join(proc, pid, "cmdline"), "rb") as f:
+                if b"scope_service.py" in f.read():
+                    return True
+        except OSError:
+            continue
+    return False
 
 
 def add_focus_before_capture(steps):

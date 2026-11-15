@@ -237,3 +237,19 @@ class AutofocusDefaultTests(unittest.TestCase):
         job = self.web.jobs[-1]
         self.assertEqual(job["kind"], "plan")
         self.assertEqual(job["steps"], [{"do": "autofocus"}, {"do": "capture", "note": "洋葱"}])
+
+
+
+class MicroscopeRunningTests(unittest.TestCase):
+    def test_detects_scope_service_process(self):
+        from scope_tools import microscope_running
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "12")); os.makedirs(os.path.join(d, "self"))
+        with open(os.path.join(d, "12", "cmdline"), "wb") as f:
+            f.write(b"python3\0/root/xiaozhi/xiaozhi_service.py\0")
+        self.assertFalse(microscope_running(d))
+        os.makedirs(os.path.join(d, "34"))
+        with open(os.path.join(d, "34", "cmdline"), "wb") as f:
+            f.write(b"python3\0/root/microscope/scope_service.py\0--screen\0")
+        self.assertTrue(microscope_running(d))
+        self.assertFalse(microscope_running(os.path.join(d, "none")))

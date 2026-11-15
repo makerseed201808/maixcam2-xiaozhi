@@ -704,6 +704,13 @@ def _peripheral_callback(component, method, *, timeout=3.0):
 
 
 async def _tool_camera_take_photo(question):
+    # 显微镜程序占着摄像头时（2026-11-15 实测：用户说“帮我拍照”，小智选了这个工具，报摄像头被占用），
+    # 改为显微镜拍照存档（默认先对焦，后台执行）。
+    from scope_tools import microscope_running
+    if await asyncio.to_thread(microscope_running):
+        res = dict(await _scope_callback("capture")(note=""))
+        res["message"] = "摄像头正由显微镜程序使用，已改为显微镜拍照：" + res.get("message", "")
+        return res
     loop = asyncio.get_running_loop()
     owner = _mcp_owner.get()
     relay=None
@@ -847,7 +854,8 @@ MCP_TOOLS = [
             "查询智能显微镜状态：当前玻片、载物台高度、电池、是否在运行，不会让显微镜动",
             [], _scope_callback("status")),
     McpTool("self.camera.take_photo",
-            "拍摄设备摄像头前的画面并回答问题。用户让你看看、识别物品或描述眼前场景时调用；question 是关于照片的问题。",
+            "拍摄设备摄像头前的画面并回答问题。用户让你看看、识别物品或描述眼前场景时调用；question 是关于照片的问题。"
+            "显微镜程序运行时摄像头归显微镜用：用户说“拍照”“拍一张”“存档”请调用 self.microscope.capture，不要用这个工具。",
             [Property("question", "string")], _tool_camera_take_photo),
     McpTool("self.camera.get_status", "查询摄像头视觉服务配置与最近拍摄状态，不拍照",
             [], _tool_camera_status),
