@@ -118,7 +118,7 @@ class ScopeToolsTest(unittest.TestCase):
                 c.publish("siot/scope_capture", json.dumps({"type": "result", "id": d["id"], "capture_id": "cap-000009",
                                                             "width": 2560, "height": 1440}))
         cam.on_message = on_cap
-        r = t.capture("细胞很清楚")
+        r = t.capture("细胞很清楚", autofocus=False)
         self.assertTrue(r["ok"]); self.assertIn("cap-000009", r["message"])
 
     def test_bad_slot(self):
@@ -210,3 +210,30 @@ class PlanTests(unittest.TestCase):
         tools = ScopeTools(config_path="/nonexistent", http=boom)
         r = tools.prepare_tour("1")
         self.assertFalse(r["ok"]); self.assertIn("连不上", r["message"])
+
+
+
+class AutofocusDefaultTests(unittest.TestCase):
+    """2026-11-15 用户要求：给小智下命令拍照时默认包含对焦。"""
+    def setUp(self):
+        self.web = FakeWeb()
+        self.tools = ScopeTools(config_path="/nonexistent", http=self.web)
+
+    def test_plan_inserts_focus_before_capture(self):
+        from scope_tools import add_focus_before_capture
+        a, c, w = {"do": "autofocus"}, {"do": "capture"}, {"do": "wait", "seconds": 10}
+        s1, s2 = {"do": "select_slot", "slot": 1}, {"do": "select_slot", "slot": 2}
+        self.assertEqual(add_focus_before_capture([s1, c, s2, c]), [s1, a, c, s2, a, c])
+        self.assertEqual(add_focus_before_capture([s1, a, c, w, c]), [s1, a, c, w, c])     # 已对焦：等待后再拍不重复对焦
+        self.assertEqual(add_focus_before_capture([c]), [a, c])                            # 当前槽直接拍：先对焦
+        self.tools.prepare_plan('[{"do":"select_slot","slot":3},{"do":"capture"}]')
+        self.assertEqual([x["do"] for x in self.web.calls[-1][2]["steps"]], ["select_slot", "autofocus", "capture"])
+        self.tools.prepare_plan('[{"do":"select_slot","slot":3},{"do":"capture"}]', autofocus=False)
+        self.assertEqual([x["do"] for x in self.web.calls[-1][2]["steps"]], ["select_slot", "capture"])
+
+    def test_single_capture_focuses_in_background(self):
+        r = self.tools.capture("洋葱")
+        self.assertTrue(r["ok"]); self.assertIn("对焦", r["message"])
+        job = self.web.jobs[-1]
+        self.assertEqual(job["kind"], "plan")
+        self.assertEqual(job["steps"], [{"do": "autofocus"}, {"do": "capture", "note": "洋葱"}])

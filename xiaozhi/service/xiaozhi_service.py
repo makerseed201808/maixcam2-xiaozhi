@@ -813,11 +813,13 @@ MCP_TOOLS = [
             "智能显微镜自动对焦，约需二十秒，完成后回复最清晰位置；没收到完成回执时说明未确认，不要自动重试。多个槽位依次对焦拍照请用 self.microscope.prepare_tour",
             [], _scope_callback("autofocus")),
     McpTool("self.microscope.capture",
-            "智能显微镜拍一张高清原图存档，note 为备注（可为空），回复存档编号",
-            [Property("note", "string", "")], _scope_callback("capture")),
+            "智能显微镜给当前玻片拍一张高清原图存档。默认先自动对焦再拍（autofocus 用 true），在后台进行，工具立即返回，"
+            "告诉用户正在对焦拍照即可；只有用户明确说“不对焦”“直接拍”时 autofocus 才填 false。note 为备注（可为空）",
+            [Property("note", "string", ""), Property("autofocus", "boolean", True)], _scope_callback("capture")),
     McpTool("self.microscope.prepare_tour",
             "智能显微镜一键巡检（第一步：准备）：依次换到多个玻片槽，每片自动对焦后拍一张存档。用户说“每个槽都拍一张”“四个玻片都拍”“巡检”时用这个，"
             "不要自己逐个调用换片/对焦/拍照。slots 填槽号如 \"1,2,3,4\"，空表示全部；autofocus 是否先对焦；note 备注。"
+            "拍照默认先对焦（autofocus 用 true），只有用户明确说不对焦才填 false。"
             "这一步只检查不动机器：把返回的步骤念给用户并问是否开始，用户确认后再调用 self.microscope.start_plan",
             [Property("slots", "string", ""), Property("autofocus", "boolean", True), Property("note", "string", "")],
             _scope_callback("prepare_tour")),
@@ -827,8 +829,9 @@ MCP_TOOLS = [
             "{\"do\":\"select_slot\",\"slot\":1到4} 换片；{\"do\":\"autofocus\"} 自动对焦；{\"do\":\"capture\",\"note\":\"备注\"} 拍照存档；"
             "{\"do\":\"light\",\"on\":true或false,\"brightness\":5到100} 开关灯/亮度；{\"do\":\"wait\",\"seconds\":1到600} 等待。最多40步。"
             "例：[{\"do\":\"select_slot\",\"slot\":1},{\"do\":\"autofocus\"},{\"do\":\"capture\"},{\"do\":\"select_slot\",\"slot\":2},{\"do\":\"capture\"}]。"
+            "拍照默认包含对焦：换片后拍照前没写对焦会自动补上（autofocus 默认 true）；只有用户明确说不对焦时 autofocus 填 false。"
             "这一步只检查不动机器：把返回的步骤念给用户并问是否开始，用户确认后再调用 self.microscope.start_plan",
-            [Property("steps", "string"), Property("note", "string", "")],
+            [Property("steps", "string"), Property("note", "string", ""), Property("autofocus", "boolean", True)],
             _scope_callback("prepare_plan")),
     McpTool("self.microscope.start_plan",
             "智能显微镜编排任务（第二步：开始执行）：只有在用户听完复述的步骤、明确说“开始”“确认”“可以”之后才调用；不需要参数，执行最近准备好的清单。"

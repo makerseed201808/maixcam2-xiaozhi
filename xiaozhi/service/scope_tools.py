@@ -45,6 +45,22 @@ def _http_json(method, url, body=None, timeout=8):
             return e.code, {}
 
 
+def add_focus_before_capture(steps):
+    """拍照默认包含对焦：开始时或每次换片后，第一张照片前没有对焦就补一步对焦；等待、开关灯不影响已对好的焦。"""
+    out, focused = [], False
+    for st in steps:
+        do = st.get("do") if isinstance(st, dict) else st
+        if do == "select_slot":
+            focused = False
+        elif do == "autofocus":
+            focused = True
+        elif do == "capture" and not focused:
+            out.append({"do": "autofocus"})
+            focused = True
+        out.append(st)
+    return out
+
+
 def _default_factory(client_id):
     import paho.mqtt.client as mqtt
     if hasattr(mqtt, "CallbackAPIVersion"):
@@ -186,7 +202,21 @@ class ScopeTools(object):
     def autofocus(self):
         return self._command("autofocus", None, 180)
 
-    def capture(self, note=""):
+    def capture(self, note="", autofocus=True):
+        """拍照默认先自动对焦（用户 2026-11-15 要求）。对焦+拍照交给网页后端后台执行（对焦有时走完整扫描约 1 分钟，
+        同步等会碰上小智约 70 秒的对话上限），工具立即返回；结果在屏幕底部和网页提示。autofocus=False 才直接拍。"""
+        if autofocus:
+            code, d = self._web_call("POST", "/api/jobs", {
+                "kind": "plan", "steps": [{"do": "autofocus"}, {"do": "capture", "note": (note or "")[:60]}],
+                "note": "小智 对焦后拍照"})
+            if code != 200:
+                return {"ok": False, "message": "没有开始对焦拍照：%s" % (d.get("error") or "网页后端返回 %s" % code)}
+            return {"ok": True, "started": True, "job_id": d.get("job_id"),
+                    "message": "正在先自动对焦再拍照（任务 %s），约 20 秒，最长约 1 分钟；完成后显微镜屏幕底部和网页会提示，"
+                               "可以问我任务进度。" % d.get("job_id")}
+        return self._capture_now(note)
+
+    def _capture_now(self, note=""):
         self._ensure()
         rid = "%s-cap-%04d" % (self._prefix, next(self._seq))
         slot = self._state.get("slot") if self._online() else None
@@ -227,13 +257,16 @@ class ScopeTools(object):
                                "；".join("%d. %s" % (i, x) for i, x in enumerate(d["says"], 1)), len(d["says"]),
                                "%d 分钟" % max(1, round(est / 60.0)) if est >= 90 else "%d 秒" % max(1, est))}
 
-    def prepare_plan(self, steps="", note=""):
-        """steps：JSON 数组字符串，如 [{"do":"select_slot","slot":1},{"do":"autofocus"},{"do":"capture"}]。"""
+    def prepare_plan(self, steps="", note="", autofocus=True):
+        """steps：JSON 数组字符串，如 [{"do":"select_slot","slot":1},{"do":"autofocus"},{"do":"capture"}]。
+        autofocus=True（默认）：拍照前如果还没对焦（开始时或换片后没对焦过），自动补一步对焦。"""
         if isinstance(steps, str):
             try:
                 steps = json.loads(steps or "[]")
             except ValueError:
                 return {"ok": False, "message": "steps 不是合法的 JSON 数组，请按工具说明的格式重写"}
+        if autofocus and isinstance(steps, list):
+            steps = add_focus_before_capture(steps)
         return self._prepare(steps, note)
 
     def prepare_tour(self, slots="", autofocus=True, note=""):
