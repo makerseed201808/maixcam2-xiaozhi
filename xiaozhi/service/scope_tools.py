@@ -287,7 +287,9 @@ class ScopeTools(object):
         code, d = self._web_call("POST", "/api/jobs/cancel", {})
         if code != 200:
             return {"ok": False, "message": d.get("error") or "没有正在进行的自动任务"}
-        return {"ok": True, "message": "已请求停止任务 %s，当前这一步做完就停（不会中途强停电机）。" % d.get("job_id")}
+        if d.get("motor_stopped"):
+            return {"ok": True, "message": "已停止任务 %s，电机已立即停下，后面的步骤不再执行。要继续用显微镜，先在网页或面板上点“复位”。" % d.get("job_id")}
+        return {"ok": True, "message": "已停止任务 %s，后面的步骤不再执行。" % d.get("job_id")}
 
     def status(self):
         self._ensure()
