@@ -1121,7 +1121,9 @@ mcp_server = McpServer()
 
 
 # ---------------- sherpa-onnx KWS 唤醒（对齐 py-xiaozhi） ----------------
-KWS_PARAMS = dict(num_threads=2, feature_dim=80, max_active_paths=2,
+# num_threads=1：板子只有 2 核，2 线程时 onnxruntime 线程间自旋等待，10 s 音频耗 CPU 13.8 s（约 1.4 核）；
+# 1 线程只要 4.6 s。显微镜 app 出画面时 2 线程会把 CPU 占满，唤醒推理跟不上、丢音频，喊“你好小智”没反应（2026-11-15 实测）。
+KWS_PARAMS = dict(num_threads=1, feature_dim=80, max_active_paths=2,
                   keywords_score=1.8, keywords_threshold=0.2,
                   num_trailing_blanks=1, provider="cpu")
 KWS_COOLDOWN = 1.5
