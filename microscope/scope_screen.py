@@ -3,11 +3,68 @@
 
 只在 scope_service.py --screen 时使用（由“显微镜”app 启动）。相机仍由 ScopeService 在主线程读取，
 这里只负责显示和读触摸，不碰相机。
+
+小智对话弹窗：小智服务把弹窗画成 /root/xiaozhi/popup.rgba（640×480 RGBA）。桌面靠注入库叠加，
+本 app 不带注入库（会卡显示驱动），所以这里自己读这张图叠到屏幕画面上；弹窗出现时触摸转给小智
+（写 /tmp/xz_cmd 的 TAP，点 X 关闭、点喇叭静音），不触发“退出”。网页预览不经过这里，不受影响。
 """
+import os
+import struct
 import time
 
 FONT_PATH = "/maixapp/share/font/SourceHanSansCN-Regular.otf"
 EXIT_BOX = (0, 0, 120, 64)        # 屏幕坐标：x, y, w, h
+POPUP_PATH = "/root/xiaozhi/popup.rgba"
+XZ_CMD = "/tmp/xz_cmd"
+
+
+def screen_to_raw_touch(x, y):
+    """屏幕坐标 → 小智 TAP 用的触摸原始坐标（竖屏 480×640）；与小智 overlay_touch_to_screen 互逆。"""
+    return 479 - int(y), int(x)
+
+
+class XiaozhiPopup(object):
+    """读小智弹窗图层；文件有变化才重读。visible 为 False 时不叠加、不花时间。"""
+
+    def __init__(self, image_mod, path=POPUP_PATH):
+        self._image, self.path = image_mod, path
+        self._sig = None
+        self.img = None
+
+    @property
+    def visible(self):
+        return self.img is not None
+
+    def refresh(self):
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            self._sig, self.img = None, None
+            return
+        sig = (st.st_mtime_ns, st.st_size)
+        if sig == self._sig:
+            return
+        try:
+            import numpy as np
+            with open(self.path, "rb") as f:
+                raw = f.read()
+            n, w, h = struct.unpack("<III", raw[:12])
+            if n < 1 or w <= 0 or h <= 0 or len(raw) < 12 + w * h * 4:
+                return                                  # 小智还没写完，下次再读
+            a = np.frombuffer(raw, np.uint8, count=w * h * 4, offset=12).reshape(h, w, 4)
+            self.img = self._image.cv2image(np.ascontiguousarray(a), bgr=False, copy=True) if a[:, :, 3].any() else None
+            self._sig = sig
+        except Exception:
+            self.img = None
+
+    def blend(self, img):
+        """img 为屏幕尺寸的 RGB888；转 RGBA 叠加再转回（板上实测约 25 ms/帧，只在弹窗显示时做）。"""
+        image = self._image
+        if self.img.width() != img.width() or self.img.height() != img.height():
+            return img
+        x = img.to_format(image.Format.FMT_RGBA8888)
+        x.draw_image(0, 0, self.img)
+        return x.to_format(image.Format.FMT_RGB888)
 
 
 class ScreenView(object):
@@ -25,6 +82,8 @@ class ScreenView(object):
         except Exception:
             pass
         self._exit = False
+        self.popup = XiaozhiPopup(image)
+        self._touch = None            # 弹窗显示时按下的位置（抬起时转给小智）
         self._last_fps_t = time.monotonic()
         self._frames = 0
         self.fps = 0.0
@@ -43,6 +102,13 @@ class ScreenView(object):
             # 正常由相机 RGB888 屏幕通道供图；万一拿到 YUV（板上不能直接转 RGB），退回灰度画面
             img = img.to_format(image.Format.FMT_GRAYSCALE).to_format(image.Format.FMT_RGB888)
         img = img.resize(self.w, self.h, image.Fit.FIT_CONTAIN)
+        self.popup.refresh()
+        if self.popup.visible:
+            try:
+                self.disp.show(self.popup.blend(img))  # 小智对话中：画面上叠对话框，不画“退出”
+                return
+            except Exception:
+                pass
         white, dark = image.Color.from_rgb(255, 255, 255), image.Color.from_rgb(0, 0, 0)
         x, y, w, h = EXIT_BOX
         img.draw_rect(x, y, w, h, dark, thickness=-1)
@@ -66,6 +132,16 @@ class ScreenView(object):
             pass
         try:
             px, py, pressed = self.ts.read()
+            if self.popup.visible or self._touch is not None:
+                # 小智对话框在屏幕上：触摸交给小智（抬起时发 TAP），不当作“退出”
+                if pressed:
+                    self._touch = (px, py)
+                elif self._touch is not None:
+                    rx, ry = screen_to_raw_touch(*self._touch)
+                    self._touch = None
+                    with open(XZ_CMD, "a") as f:
+                        f.write("TAP %d %d\n" % (rx, ry))
+                return self._exit
             x, y, w, h = EXIT_BOX
             if pressed and x <= px < x + w and y <= py < y + h:
                 self._exit = True

@@ -49,7 +49,9 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    with UiLease():
+    # 只占用“触摸唤醒”（免得点“退出”误唤醒小智）；不占用弹窗：小智照常画对话框，
+    # 由显微服务的屏幕显示把它叠到实时画面上（只上屏幕，网页预览不叠）。
+    with UiLease(scopes=("touch_wake",)):
         if stop_at is not None:
             return 0
         try:

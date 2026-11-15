@@ -96,7 +96,13 @@ def _lock(path):
 
 
 class UiLease:
-    def __init__(self, path=DEFAULT_PATH, *, pid=None, process_start=process_start_ticks):
+    def __init__(self, path=DEFAULT_PATH, *, pid=None, process_start=process_start_ticks, scopes=None):
+        """scopes：占用哪些范围，默认全部（popup + touch_wake）。
+        只给 ('touch_wake',) 时小智照常画对话弹窗，由占用屏幕的 app 自己把弹窗叠到画面上（显微镜 app）。"""
+        scopes = sorted(SCOPES if scopes is None else set(scopes))
+        if not scopes or any(scope not in SCOPES for scope in scopes):
+            raise ValueError('Unknown UI scope')
+        self.scopes = scopes
         self.path = Path(path)
         self.pid = os.getpid() if pid is None else pid
         self.process_start = process_start
@@ -116,7 +122,7 @@ class UiLease:
             if _is_live(_read_record(self.path), self.process_start):
                 raise RuntimeError('UI is already owned by another app')
             data = {'version': 1, 'pid': self.pid, 'start_ticks': ticks,
-                    'lease_id': self.lease_id, 'scopes': sorted(SCOPES)}
+                    'lease_id': self.lease_id, 'scopes': self.scopes}
             descriptor, temporary = tempfile.mkstemp(prefix=self.path.name + '.', dir=str(self.path.parent))
             with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
                 os.chmod(temporary, 0o600)
