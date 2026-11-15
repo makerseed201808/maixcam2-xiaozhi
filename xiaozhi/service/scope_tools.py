@@ -53,7 +53,7 @@ def _default_factory(client_id):
 
 
 class ScopeTools(object):
-    OFFLINE_AFTER_S = 3.0
+    OFFLINE_AFTER_S = 5.0          # 与网页“离线”显示、M10 链路保护一致（用户 2026-11-15 定为 5 秒）
 
     def __init__(self, config_path="/etc/siot/monitor.json", factory=None, clock=time.time, http=None,
                  web_base=WEB_BASE):
@@ -143,7 +143,7 @@ class ScopeTools(object):
     def _command(self, cmd, args, timeout_s):
         self._ensure()
         if not self._online():
-            return {"ok": False, "confirmed": False, "message": "显微镜控制板离线（超过 3 秒没有状态），命令未发送"}
+            return {"ok": False, "confirmed": False, "message": "显微镜控制板离线（超过 5 秒没有状态），命令未发送"}
         cid = "%s-%04d" % (self._prefix, next(self._seq))
         msg = {"id": cid, "cmd": cmd}
         if args:
@@ -294,7 +294,7 @@ class ScopeTools(object):
     def status(self):
         self._ensure()
         if not self._online():
-            return {"online": False, "message": "显微镜控制板离线（超过 3 秒没有状态）"}
+            return {"online": False, "message": "显微镜控制板离线（超过 5 秒没有状态）"}
         s = self._state
         parts = [STATE_LABEL.get(s.get("state"), s.get("state"))]
         parts.append("当前 %s 号玻片" % s["slot"] if s.get("slot") else "未在任何玻片槽位")
