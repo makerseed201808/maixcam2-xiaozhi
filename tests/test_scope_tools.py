@@ -182,6 +182,10 @@ class PlanTests(unittest.TestCase):
                                  {"do": "select_slot", "slot": 3}, {"do": "capture"}])
         self.tools.prepare_tour("")
         self.assertEqual(len(self.web.calls[1][2]["steps"]), 12)
+        self.tools.prepare_tour("12", autofocus=False)            # 小智把“1号和2号”写成 "12"
+        self.assertEqual([x["slot"] for x in self.web.calls[2][2]["steps"] if x["do"] == "select_slot"], [1, 2])
+        self.tools.prepare_tour("15", autofocus=False)            # 含 5：不拆，交给后端拒绝
+        self.assertEqual(self.web.calls[3][2]["steps"][0]["slot"], 15)
 
     def test_bad_plan_and_expiry(self):
         self.assertFalse(self.tools.prepare_plan("不是json")["ok"])

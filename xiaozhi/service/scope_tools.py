@@ -239,7 +239,9 @@ class ScopeTools(object):
     def prepare_tour(self, slots="", autofocus=True, note=""):
         """slots：如 "1,2,3,4" 或 "2 4"，空 = 全部 4 个槽。每片换片→（对焦）→拍照。"""
         try:
-            nums = [int(x) for x in re.split(r"[,，、\s]+", str(slots or "").strip()) if x]
+            # 只有 1–4 号槽：小智有时把“1号和2号”写成 "12"，每一位都是 1–4 时按单个数字拆开
+            parts = [x for x in re.split(r"[,，、和\s]+", str(slots or "").strip()) if x]
+            nums = [int(c) for x in parts for c in (x if len(x) > 1 and set(x) <= set("1234") else [x])]
         except ValueError:
             return {"ok": False, "message": "槽号要写成 1 到 4 的数字，例如 1,2,3,4"}
         steps = []
