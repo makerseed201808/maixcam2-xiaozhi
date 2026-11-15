@@ -4,9 +4,17 @@
 再答复；超时只报告“未确认”，绝不自动重发。拍照经 siot/scope_capture 发给显微服务，等结果。
 连接按需建立，SIoT 账号读 /etc/siot/monitor.json；导入本模块不打开任何连接。
 消息格式见 smart-microscope 仓库 docs/protocol.md。
+
+编排任务（2026-11-15）：多步操作（巡检、按清单换片/对焦/拍照/开关灯/等待）交给网页后端
+（本机 :8000 /api/jobs）在后台跑。小智云端一轮回答约 70 秒就会断开（实测两次 68–73 s），
+逐个调用 select_slot/autofocus/capture 做四个槽要 2 分钟以上，会做到一半停下。
+两步确认（用户 2026-11-15 选定）：prepare_plan / prepare_tour 只检查清单、返回中文复述，不动机器；
+用户听完说“开始”后 start_plan 才提交。待执行清单存在本进程里 PENDING_TTL_S 秒，
+start_plan 不带参数，所以中途对话断开、重新唤醒后说“开始”也能接上。
 """
 import itertools
 import json
+import re
 import threading
 import time
 
@@ -14,6 +22,27 @@ TOPICS = {"cmd": "siot/scope_cmd", "ack": "siot/scope_ack", "state": "siot/scope
           "capture": "siot/scope_capture"}
 STATE_LABEL = {"unhomed": "未回零", "idle": "就绪", "busy": "运行中", "stopped": "已停止",
                "error": "故障", "calibrating": "槽位标定中"}
+
+
+WEB_BASE = "http://127.0.0.1:8000"
+PENDING_TTL_S = 300
+
+
+def _http_json(method, url, body=None, timeout=8):
+    """访问本机网页后端；不走系统代理。返回 (状态码, JSON)。"""
+    import urllib.request
+    import urllib.error
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8") or "{}")
+        except ValueError:
+            return e.code, {}
 
 
 def _default_factory(client_id):
@@ -26,7 +55,12 @@ def _default_factory(client_id):
 class ScopeTools(object):
     OFFLINE_AFTER_S = 3.0
 
-    def __init__(self, config_path="/etc/siot/monitor.json", factory=None, clock=time.time):
+    def __init__(self, config_path="/etc/siot/monitor.json", factory=None, clock=time.time, http=None,
+                 web_base=WEB_BASE):
+        self._http = http or _http_json
+        self._pending = None          # 待用户确认的清单 {"steps", "says", "est_s", "note", "t"}
+        self._pending_lock = threading.Lock()
+        self._web = web_base.rstrip("/")
         self._path = config_path
         self._factory = factory or _default_factory
         self._clock = clock
@@ -171,6 +205,87 @@ class ScopeTools(object):
                     return {"ok": False, "confirmed": True, "message": "拍照失败：%s" % r.get("reason")}
                 self._cv.wait(0.2)
         return {"ok": False, "confirmed": False, "message": "25 秒内没有收到拍照结果，未确认；没有自动重拍。"}
+
+    # ---------- 编排任务 / 一键巡检（网页后端后台执行，两步确认） ----------
+    def _web_call(self, method, path, body=None):
+        try:
+            return self._http(method, self._web + path, body)
+        except Exception as exc:
+            return None, {"error": "连不上显微镜网页后端（%s）" % exc.__class__.__name__}
+
+    def _prepare(self, steps, note):
+        code, d = self._web_call("POST", "/api/jobs/plan_check", {"steps": steps})
+        if code != 200:
+            return {"ok": False, "message": "清单没有通过检查，没有执行：%s" % (d.get("error") or "网页后端返回 %s" % code)}
+        with self._pending_lock:
+            self._pending = {"steps": d["steps"], "says": d["says"], "est_s": d.get("est_s") or 0,
+                             "note": ("小智 " + (note or "")).strip()[:100], "t": self._clock()}
+        est = d.get("est_s") or 0
+        return {"ok": True, "started": False, "steps": d["says"],
+                "message": "还没有开始。请把下面的步骤念给用户，并问“确认开始吗？”；用户说开始/确认后再调用 "
+                           "self.microscope.start_plan，用户说不要就不调用。步骤：%s。共 %d 步，预计约 %s。" % (
+                               "；".join("%d. %s" % (i, x) for i, x in enumerate(d["says"], 1)), len(d["says"]),
+                               "%d 分钟" % max(1, round(est / 60.0)) if est >= 90 else "%d 秒" % max(1, est))}
+
+    def prepare_plan(self, steps="", note=""):
+        """steps：JSON 数组字符串，如 [{"do":"select_slot","slot":1},{"do":"autofocus"},{"do":"capture"}]。"""
+        if isinstance(steps, str):
+            try:
+                steps = json.loads(steps or "[]")
+            except ValueError:
+                return {"ok": False, "message": "steps 不是合法的 JSON 数组，请按工具说明的格式重写"}
+        return self._prepare(steps, note)
+
+    def prepare_tour(self, slots="", autofocus=True, note=""):
+        """slots：如 "1,2,3,4" 或 "2 4"，空 = 全部 4 个槽。每片换片→（对焦）→拍照。"""
+        try:
+            nums = [int(x) for x in re.split(r"[,，、\s]+", str(slots or "").strip()) if x]
+        except ValueError:
+            return {"ok": False, "message": "槽号要写成 1 到 4 的数字，例如 1,2,3,4"}
+        steps = []
+        for n in nums or [1, 2, 3, 4]:
+            steps += [{"do": "select_slot", "slot": n}] + ([{"do": "autofocus"}] if autofocus else []) + [{"do": "capture"}]
+        return self._prepare(steps, note)
+
+    def start_plan(self):
+        with self._pending_lock:
+            p, self._pending = self._pending, None
+        if p is None:
+            return {"ok": False, "message": "没有待确认的清单，请先说要做什么（先生成清单并复述给用户）"}
+        if self._clock() - p["t"] > PENDING_TTL_S:
+            return {"ok": False, "message": "清单是 %d 分钟前生成的，已过期，没有执行；请重新说一遍要做什么" % (PENDING_TTL_S // 60)}
+        code, d = self._web_call("POST", "/api/jobs", {"kind": "plan", "steps": p["steps"], "note": p["note"]})
+        if code != 200:
+            return {"ok": False, "message": "没有开始：%s" % (d.get("error") or "网页后端返回 %s" % code)}
+        return {"ok": True, "started": True, "job_id": d.get("job_id"),
+                "message": "已开始任务 %s，共 %d 步，在后台进行，对话结束也会继续。可以随时问我进度，或说停止任务。"
+                           % (d.get("job_id"), len(p["steps"]))}
+
+    def job_status(self):
+        code, d = self._web_call("GET", "/api/jobs?limit=1")
+        if code != 200:
+            return {"ok": False, "message": "查不到任务状态：%s" % (d.get("error") or code)}
+        jobs = d.get("jobs") or []
+        if not jobs:
+            return {"ok": True, "running": False, "message": "还没有做过自动任务。"}
+        j = jobs[0]
+        running = d.get("active") == j.get("job_id")
+        recs = j.get("records")
+        n = len(recs) if isinstance(recs, list) else None
+        msg = "任务 %s %s。" % (j.get("job_id"), "正在进行：%s" % (j.get("progress") or "") if running
+                                else "已结束（%s）%s" % (j.get("status"), "：" + j["error"] if j.get("error") else ""))
+        if n is not None:
+            msg += "已拍 %d 张。" % n
+        return {"ok": True, "running": running, "job_id": j.get("job_id"), "status": j.get("status"),
+                "progress": j.get("progress"), "photos": n, "message": msg}
+
+    def stop_job(self):
+        with self._pending_lock:
+            self._pending = None
+        code, d = self._web_call("POST", "/api/jobs/cancel", {})
+        if code != 200:
+            return {"ok": False, "message": d.get("error") or "没有正在进行的自动任务"}
+        return {"ok": True, "message": "已请求停止任务 %s，当前这一步做完就停（不会中途强停电机）。" % d.get("job_id")}
 
     def status(self):
         self._ensure()

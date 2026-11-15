@@ -129,3 +129,80 @@ class ScopeToolsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeWeb(object):
+    """替身网页后端：plan_check 只认 select_slot/autofocus/capture，jobs 记录提交的清单。"""
+    def __init__(self):
+        self.calls = []
+        self.jobs = []
+
+    def __call__(self, method, url, body=None, timeout=8):
+        path = url.split("8000", 1)[1]
+        self.calls.append((method, path, body))
+        if path == "/api/jobs/plan_check":
+            names = {"select_slot": lambda s: "换到 %d 号玻片" % s["slot"], "autofocus": lambda s: "自动对焦",
+                     "capture": lambda s: "拍照存档"}
+            if any(s.get("do") not in names for s in body["steps"]):
+                return 400, {"error": "第 1 步不是允许的步骤"}
+            return 200, {"steps": body["steps"], "says": [names[s["do"]](s) for s in body["steps"]],
+                         "est_s": 34 * len(body["steps"])}
+        if path == "/api/jobs" and method == "POST":
+            self.jobs.append(body)
+            return 200, {"job_id": "J-1", "status": "running"}
+        if path.startswith("/api/jobs?"):
+            return 200, {"active": "J-1", "jobs": [{"job_id": "J-1", "status": "running", "progress": "步骤 2/3 自动对焦",
+                                                    "records": ["R-1"]}]}
+        if path == "/api/jobs/cancel":
+            return 200, {"job_id": "J-1"}
+        return 404, {}
+
+
+class PlanTests(unittest.TestCase):
+    def setUp(self):
+        self.t = [1000.0]
+        self.web = FakeWeb()
+        self.tools = ScopeTools(config_path="/nonexistent", clock=lambda: self.t[0], http=self.web)
+
+    def test_prepare_does_not_start_until_confirmed(self):
+        r = self.tools.prepare_plan('[{"do":"select_slot","slot":2},{"do":"autofocus"},{"do":"capture"}]', note="课堂")
+        self.assertTrue(r["ok"]) ; self.assertFalse(r["started"])
+        self.assertIn("换到 2 号玻片", r["message"]); self.assertIn("确认开始", r["message"])
+        self.assertEqual(self.web.jobs, [])                         # 只检查，没提交
+        r = self.tools.start_plan()
+        self.assertTrue(r["started"])
+        self.assertEqual(self.web.jobs[0]["kind"], "plan")
+        self.assertEqual(len(self.web.jobs[0]["steps"]), 3); self.assertEqual(self.web.jobs[0]["note"], "小智 课堂")
+        self.assertFalse(self.tools.start_plan()["ok"])              # 一份清单只执行一次
+
+    def test_tour_preset_builds_steps(self):
+        self.tools.prepare_tour("1，3", autofocus=False)
+        steps = self.web.calls[0][2]["steps"]
+        self.assertEqual(steps, [{"do": "select_slot", "slot": 1}, {"do": "capture"},
+                                 {"do": "select_slot", "slot": 3}, {"do": "capture"}])
+        self.tools.prepare_tour("")
+        self.assertEqual(len(self.web.calls[1][2]["steps"]), 12)
+
+    def test_bad_plan_and_expiry(self):
+        self.assertFalse(self.tools.prepare_plan("不是json")["ok"])
+        r = self.tools.prepare_plan('[{"do":"move_z","z":1}]')
+        self.assertFalse(r["ok"]); self.assertIn("不是允许", r["message"])
+        self.assertFalse(self.tools.start_plan()["ok"])
+        self.tools.prepare_tour("1")
+        self.t[0] += 301
+        r = self.tools.start_plan()
+        self.assertFalse(r["ok"]); self.assertIn("过期", r["message"]); self.assertEqual(self.web.jobs, [])
+
+    def test_status_counts_records_and_stop_clears_pending(self):
+        r = self.tools.job_status()
+        self.assertTrue(r["running"]); self.assertEqual(r["photos"], 1); self.assertIn("已拍 1 张", r["message"])
+        self.tools.prepare_tour("1")
+        self.assertTrue(self.tools.stop_job()["ok"])
+        self.assertFalse(self.tools.start_plan()["ok"])
+
+    def test_backend_unreachable(self):
+        def boom(*a, **k):
+            raise OSError("refused")
+        tools = ScopeTools(config_path="/nonexistent", http=boom)
+        r = tools.prepare_tour("1")
+        self.assertFalse(r["ok"]); self.assertIn("连不上", r["message"])

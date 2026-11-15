@@ -807,14 +807,39 @@ MCP_TOOLS = [
     McpTool("self.display.show_message", "在屏幕上显示一条消息",
             [Property("message", "string")], _tool_show_message),
     McpTool("self.microscope.select_slot",
-            "智能显微镜换玻片：转盘换到第 slot 号玻片（1–4）。会先抬升载物台再转盘，完成后才回复；没收到完成回执时说明未确认，不要自动重试",
+            "智能显微镜换玻片：转盘换到第 slot 号玻片（1–4）。会先抬升载物台再转盘，完成后才回复；没收到完成回执时说明未确认，不要自动重试。只处理一个槽；要依次处理多个槽（巡检、全部拍照）必须用 self.microscope.prepare_tour 或 prepare_plan",
             [Property("slot", "integer", None, 1, 4)], _scope_callback("select_slot")),
     McpTool("self.microscope.autofocus",
-            "智能显微镜自动对焦，约需一到两分钟，完成后回复最清晰位置；没收到完成回执时说明未确认，不要自动重试",
+            "智能显微镜自动对焦，约需二十秒，完成后回复最清晰位置；没收到完成回执时说明未确认，不要自动重试。多个槽位依次对焦拍照请用 self.microscope.prepare_tour",
             [], _scope_callback("autofocus")),
     McpTool("self.microscope.capture",
             "智能显微镜拍一张高清原图存档，note 为备注（可为空），回复存档编号",
             [Property("note", "string", "")], _scope_callback("capture")),
+    McpTool("self.microscope.prepare_tour",
+            "智能显微镜一键巡检（第一步：准备）：依次换到多个玻片槽，每片自动对焦后拍一张存档。用户说“每个槽都拍一张”“四个玻片都拍”“巡检”时用这个，"
+            "不要自己逐个调用换片/对焦/拍照。slots 填槽号如 \"1,2,3,4\"，空表示全部；autofocus 是否先对焦；note 备注。"
+            "这一步只检查不动机器：把返回的步骤念给用户并问是否开始，用户确认后再调用 self.microscope.start_plan",
+            [Property("slots", "string", ""), Property("autofocus", "boolean", True), Property("note", "string", "")],
+            _scope_callback("prepare_tour")),
+    McpTool("self.microscope.prepare_plan",
+            "智能显微镜编排任务（第一步：准备）：用户一次说了多步操作（如“1号和3号对焦拍照，2号只拍照，最后关灯”“等5分钟再拍”）时，"
+            "把它写成步骤清单 steps（JSON 数组字符串），只调用这一次，不要自己逐个调用换片/对焦/拍照。可用步骤只有："
+            "{\"do\":\"select_slot\",\"slot\":1到4} 换片；{\"do\":\"autofocus\"} 自动对焦；{\"do\":\"capture\",\"note\":\"备注\"} 拍照存档；"
+            "{\"do\":\"light\",\"on\":true或false,\"brightness\":5到100} 开关灯/亮度；{\"do\":\"wait\",\"seconds\":1到600} 等待。最多40步。"
+            "例：[{\"do\":\"select_slot\",\"slot\":1},{\"do\":\"autofocus\"},{\"do\":\"capture\"},{\"do\":\"select_slot\",\"slot\":2},{\"do\":\"capture\"}]。"
+            "这一步只检查不动机器：把返回的步骤念给用户并问是否开始，用户确认后再调用 self.microscope.start_plan",
+            [Property("steps", "string"), Property("note", "string", "")],
+            _scope_callback("prepare_plan")),
+    McpTool("self.microscope.start_plan",
+            "智能显微镜编排任务（第二步：开始执行）：只有在用户听完复述的步骤、明确说“开始”“确认”“可以”之后才调用；不需要参数，执行最近准备好的清单。"
+            "工具立即返回，任务在后台进行，对话结束也不影响；告诉用户已开始即可，不要等待或反复查询",
+            [], _scope_callback("start_plan")),
+    McpTool("self.microscope.job_status",
+            "查询智能显微镜自动任务（巡检/编排）的进度或结果：正在第几步、是否完成、拍了几张，不会让显微镜动",
+            [], _scope_callback("job_status")),
+    McpTool("self.microscope.stop_job",
+            "停止正在进行的智能显微镜自动任务（巡检/编排）：当前这一步做完后停下，不会中途强停电机",
+            [], _scope_callback("stop_job")),
     McpTool("self.microscope.get_status",
             "查询智能显微镜状态：当前玻片、载物台高度、电池、是否在运行，不会让显微镜动",
             [], _scope_callback("status")),
