@@ -1,0 +1,23 @@
+# MaixCAM2 显微服务开机自启。安装：
+#   cp microscope-scope.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now microscope-scope
+# 不能强杀：相机打开时被强制结束可能导致 "vi init failed"，只能重启恢复。
+# 所以停止时只写停止文件并等待自行退出；不发 SIGKILL，默认 SIGTERM 换成无害的 SIGCONT。
+[Unit]
+Description=Smart microscope camera service (scope_service.py, port 8091)
+After=network-online.target siot.service
+
+[Service]
+WorkingDirectory=/root/microscope
+ExecStartPre=/bin/rm -f /tmp/scope_service.stop
+ExecStart=/usr/bin/python3 -u scope_service.py
+ExecStop=/bin/sh -c 'touch /tmp/scope_service.stop; for i in $(seq 1 40); do kill -0 $MAINPID 2>/dev/null || exit 0; sleep 0.5; done; echo "20 s 内未退出，未强杀" >&2'
+KillSignal=SIGCONT
+SendSIGKILL=no
+TimeoutStopSec=25
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/tmp/scope_service.log
+StandardError=append:/tmp/scope_service.log
+
+[Install]
+WantedBy=multi-user.target

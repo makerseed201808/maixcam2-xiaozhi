@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-
+"""显微镜 app 屏幕叠加小智弹窗（2026-11-15）：不依赖 maix，用假的 image 模块。"""
+import os
+import struct
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "xiaozhi", "service"))
+
+from scope_screen import XiaozhiPopup, screen_to_raw_touch  # noqa: E402
+
+
+class FakeImage(object):
+    @staticmethod
+    def cv2image(arr, bgr=False, copy=True):
+        return ("img", arr.shape)
+
+
+def write_popup(path, alpha):
+    a = np.zeros((480, 640, 4), np.uint8)
+    a[:, :, 3] = alpha
+    with open(path, "wb") as f:
+        f.write(struct.pack("<III", 1, 640, 480) + a.tobytes())
+
+
+def test_popup_visible_only_when_any_alpha(tmp_path):
+    p = str(tmp_path / "popup.rgba")
+    pop = XiaozhiPopup(FakeImage, p)
+    pop.refresh()
+    assert not pop.visible                          # 文件不存在
+    write_popup(p, 0)
+    pop.refresh()
+    assert not pop.visible                          # 全透明 = 小智没弹窗
+    write_popup(p, 200)
+    os.utime(p, ns=(1, 2))
+    pop.refresh()
+    assert pop.visible
+    with open(p, "wb") as f:                        # 写到一半：保持上次结果，不报错
+        f.write(struct.pack("<III", 1, 640, 480) + b"\0" * 100)
+    pop.refresh()
+    assert pop.visible
+
+
+def test_touch_mapping_is_inverse_of_xiaozhi():
+    def overlay_touch_to_screen(raw_x, raw_y):       # 与 xiaozhi_service.overlay_touch_to_screen 相同
+        return min(raw_y, 639), max(0, 479 - raw_x)
+    for x, y in ((0, 0), (639, 479), (600, 20), (320, 240)):
+        assert overlay_touch_to_screen(*screen_to_raw_touch(x, y)) == (x, y)
+
+
+def test_ui_lease_partial_scope(tmp_path):
+    from ui_ownership import UiLease, UiLeaseReader
+    path = str(tmp_path / "owner.json")
+    ps = lambda pid: "123"                          # Mac 上没有 /proc：用假的进程启动时刻
+    with UiLease(path, scopes=("touch_wake",), process_start=ps):
+        r = UiLeaseReader(path, process_start=ps)
+        assert r.active("touch_wake") and not r.active("popup")
+    with UiLease(path, process_start=ps):
+        r = UiLeaseReader(path, process_start=ps)
+        assert r.active("touch_wake") and r.active("popup")
+    import pytest
+    with pytest.raises(ValueError):
+        UiLease(path, scopes=("screen",))
+
+
+def test_job_banner_running_done_and_expiry(tmp_path):
+    import json
+    import os
+    from scope_screen import JobBanner
+    p = tmp_path / "job.json"
+    t = [1000.0]
+    jb = JobBanner(str(p), clock=lambda: t[0])
+    jb.refresh()
+    assert jb.line() is None
+    p.write_text(json.dumps({"status": "running", "progress": "步骤 5/12 自动对焦", "photos": 1, "total": 4}), encoding="utf-8")
+    jb.refresh()
+    assert jb.line() == ("自动任务  步骤 5/12 自动对焦  已拍 1/4 张", "run")
+    p.write_text(json.dumps({"status": "done", "progress": "全部完成", "photos": 4, "total": 4, "ended_at": 995.0}),
+                 encoding="utf-8")
+    os.utime(p, ns=(1, 2))                        # 保证 mtime 变化
+    jb.refresh()
+    assert jb.line() == ("自动任务完成  已拍 4/4 张", "ok")
+    t[0] = 1030.0
+    assert jb.line() is None                      # 结束 30 秒后不再显示
+
+
+def test_web_qr_fetch_toggle_and_layout():
+    from scope_screen import WebQr, QR_SHOW_FIRST_S
+    now = [0.0]
+    rows = ["1" * 25] * 25
+    answers = [OSError("网页后端还没起来"), {"url": "http://192.168.43.25:8000/", "rows": rows},
+               {"url": "http://192.168.43.25:8000/", "rows": rows}, {"url": None, "rows": []},
+               {"url": "http://192.168.8.20:8000/", "rows": ["10"] * 3}, {"url": "http://192.168.8.20:8000/", "rows": rows}]
+
+    def fetch(url):
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+    q = WebQr(fetch=fetch, clock=lambda: now[0])
+    assert not q.refresh() and not q.visible                 # 后端没起来：不显示，不报错
+    assert q.refresh() and q.version == 1 and q.visible      # 开头自动显示
+    assert not q.refresh() and q.version == 1                # 网址没变
+    assert not q.refresh() and q.url                         # 后端暂时没有地址：保留旧的
+    assert not q.refresh()                                   # 行列不一致：丢弃
+    assert q.refresh() and q.url == "http://192.168.8.20:8000/" and q.version == 2   # 换网络
+    now[0] = QR_SHOW_FIRST_S + 1
+    assert not q.visible                                     # 30 秒后自动收起
+    q.toggle(); assert q.visible
+    q.toggle(); assert not q.visible
+    x, y, scale, size = q.layout(640, 480)
+    assert size == (25 + 8) * scale and x + size <= 640 and y + size + 40 <= 480 and scale >= 4
